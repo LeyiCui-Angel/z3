@@ -246,7 +246,7 @@ void date_decl_plugin::get_op_names(svector<builtin_name>& op_names, symbol cons
     op_names.push_back(builtin_name("p-years",    OP_PERIOD_YEARS));
     op_names.push_back(builtin_name("p-months",   OP_PERIOD_MONTHS));
     op_names.push_back(builtin_name("p-days",     OP_PERIOD_DAYS));
-    // Register both named functions and overloaded operators
+    // Register both named functions and overloaded operators for Date operations
     op_names.push_back(builtin_name("date_add",   OP_DATE_ADD));
     op_names.push_back(builtin_name("+",          OP_DATE_ADD));
     op_names.push_back(builtin_name("date_sub",   OP_DATE_SUB));
@@ -255,6 +255,7 @@ void date_decl_plugin::get_op_names(svector<builtin_name>& op_names, symbol cons
     op_names.push_back(builtin_name("date_le",    OP_DATE_LE));
     op_names.push_back(builtin_name("date_gt",    OP_DATE_GT));
     op_names.push_back(builtin_name("date_ge",    OP_DATE_GE));
+    // Period operations use named functions to avoid ambiguity with Date operations
     op_names.push_back(builtin_name("period_add", OP_PERIOD_ADD));
     op_names.push_back(builtin_name("period_sub", OP_PERIOD_SUB));
     op_names.push_back(builtin_name("period_mul", OP_PERIOD_MUL));
