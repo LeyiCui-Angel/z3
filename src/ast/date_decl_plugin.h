@@ -27,6 +27,9 @@ enum date_sort_kind {
 enum date_op_kind {
     OP_DATE_MK,          // mk-date(year: Int, month: Int, day: Int) -> Date
     OP_PERIOD_MK,        // mk-period(years: Int, months: Int, days: Int) -> Period
+    OP_DATE_YEAR,        // date-year(d: Date) -> Int
+    OP_DATE_MONTH,       // date-month(d: Date) -> Int
+    OP_DATE_DAY,         // date-day(d: Date) -> Int
     OP_PERIOD_YEARS,     // p-years(p: Period) -> Int
     OP_PERIOD_MONTHS,    // p-months(p: Period) -> Int
     OP_PERIOD_DAYS,      // p-days(p: Period) -> Int
@@ -88,6 +91,10 @@ public:
 
     bool is_mk_date(expr const* e) const { return is_app_of(e, m_family_id, OP_DATE_MK); }
     bool is_mk_period(expr const* e) const { return is_app_of(e, m_family_id, OP_PERIOD_MK); }
+
+    bool is_date_year(expr const* e) const { return is_app_of(e, m_family_id, OP_DATE_YEAR); }
+    bool is_date_month(expr const* e) const { return is_app_of(e, m_family_id, OP_DATE_MONTH); }
+    bool is_date_day(expr const* e) const { return is_app_of(e, m_family_id, OP_DATE_DAY); }
 
     bool is_date_add(expr const* e) const { return is_app_of(e, m_family_id, OP_DATE_ADD); }
     bool is_date_sub(expr const* e) const { return is_app_of(e, m_family_id, OP_DATE_SUB); }

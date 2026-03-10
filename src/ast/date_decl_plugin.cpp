@@ -65,6 +65,36 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
+    case OP_DATE_YEAR:
+        if (arity != 1)
+            msg << "date-year expects 1 argument, received " << arity;
+        else if (domain[0] != m_date_sort)
+            msg << "date-year expects Date argument, got " << mk_pp(domain[0], m);
+        else
+            return m.mk_func_decl(symbol("date-year"), arity, domain, isort,
+                                  func_decl_info(m_family_id, k, 0, nullptr));
+        m.raise_exception(msg.str());
+
+    case OP_DATE_MONTH:
+        if (arity != 1)
+            msg << "date-month expects 1 argument, received " << arity;
+        else if (domain[0] != m_date_sort)
+            msg << "date-month expects Date argument, got " << mk_pp(domain[0], m);
+        else
+            return m.mk_func_decl(symbol("date-month"), arity, domain, isort,
+                                  func_decl_info(m_family_id, k, 0, nullptr));
+        m.raise_exception(msg.str());
+
+    case OP_DATE_DAY:
+        if (arity != 1)
+            msg << "date-day expects 1 argument, received " << arity;
+        else if (domain[0] != m_date_sort)
+            msg << "date-day expects Date argument, got " << mk_pp(domain[0], m);
+        else
+            return m.mk_func_decl(symbol("date-day"), arity, domain, isort,
+                                  func_decl_info(m_family_id, k, 0, nullptr));
+        m.raise_exception(msg.str());
+
     case OP_PERIOD_MK:
         if (arity != 3)
             msg << "mk-period expects 3 arguments, received " << arity;
@@ -210,6 +240,9 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
 void date_decl_plugin::get_op_names(svector<builtin_name>& op_names, symbol const& logic) {
     op_names.push_back(builtin_name("mk-date",    OP_DATE_MK));
     op_names.push_back(builtin_name("mk-period",  OP_PERIOD_MK));
+    op_names.push_back(builtin_name("date-year",  OP_DATE_YEAR));
+    op_names.push_back(builtin_name("date-month", OP_DATE_MONTH));
+    op_names.push_back(builtin_name("date-day",   OP_DATE_DAY));
     op_names.push_back(builtin_name("p-years",    OP_PERIOD_YEARS));
     op_names.push_back(builtin_name("p-months",   OP_PERIOD_MONTHS));
     op_names.push_back(builtin_name("p-days",     OP_PERIOD_DAYS));
