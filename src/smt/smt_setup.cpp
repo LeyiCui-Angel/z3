@@ -40,6 +40,7 @@ Revision History:
 #include "smt/theory_pb.h"
 #include "smt/theory_fpa.h"
 #include "smt/theory_polymorphism.h"
+#include "smt/theory_date.h"
 
 namespace smt {
 
@@ -788,6 +789,10 @@ namespace smt {
         m_context.register_plugin(alloc(smt::theory_special_relations, m_context, m_manager));
     }
 
+    void setup::setup_date() {
+        m_context.register_plugin(alloc(smt::theory_date, m_context));
+    }
+
     void setup::setup_polymorphism() {
         if (m_manager.has_type_vars())
             m_context.register_plugin(alloc(theory_polymorphism, m_context));
@@ -808,6 +813,7 @@ namespace smt {
         setup_seq_str(st);
         setup_fpa();
         setup_special_relations();
+        setup_date();
         setup_polymorphism();
         setup_relevancy(st);
     }
