@@ -137,25 +137,25 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
 
     case OP_DATE_ADD:
         if (arity != 2)
-            msg << "date_add expects 2 arguments, received " << arity;
+            msg << "+ (Date, Period) expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "date_add expects Date as first argument, got " << mk_pp(domain[0], m);
+            msg << "+ expects Date as first argument, got " << mk_pp(domain[0], m);
         else if (domain[1] != m_period_sort)
-            msg << "date_add expects Period as second argument, got " << mk_pp(domain[1], m);
+            msg << "+ expects Period as second argument, got " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("date_add"), arity, domain, m_date_sort,
+            return m.mk_func_decl(symbol("+"), arity, domain, m_date_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_SUB:
         if (arity != 2)
-            msg << "date_sub expects 2 arguments, received " << arity;
+            msg << "- (Date, Period) expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "date_sub expects Date as first argument, got " << mk_pp(domain[0], m);
+            msg << "- expects Date as first argument, got " << mk_pp(domain[0], m);
         else if (domain[1] != m_period_sort)
-            msg << "date_sub expects Period as second argument, got " << mk_pp(domain[1], m);
+            msg << "- expects Period as second argument, got " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("date_sub"), arity, domain, m_date_sort,
+            return m.mk_func_decl(symbol("-"), arity, domain, m_date_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
@@ -246,8 +246,11 @@ void date_decl_plugin::get_op_names(svector<builtin_name>& op_names, symbol cons
     op_names.push_back(builtin_name("p-years",    OP_PERIOD_YEARS));
     op_names.push_back(builtin_name("p-months",   OP_PERIOD_MONTHS));
     op_names.push_back(builtin_name("p-days",     OP_PERIOD_DAYS));
+    // Register both named functions and overloaded operators
     op_names.push_back(builtin_name("date_add",   OP_DATE_ADD));
+    op_names.push_back(builtin_name("+",          OP_DATE_ADD));
     op_names.push_back(builtin_name("date_sub",   OP_DATE_SUB));
+    op_names.push_back(builtin_name("-",          OP_DATE_SUB));
     op_names.push_back(builtin_name("date_lt",    OP_DATE_LT));
     op_names.push_back(builtin_name("date_le",    OP_DATE_LE));
     op_names.push_back(builtin_name("date_gt",    OP_DATE_GT));
