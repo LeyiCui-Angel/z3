@@ -57,177 +57,177 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
     switch (k) {
     case OP_DATE_MK:
         if (arity != 3)
-            msg << "mk-date expects 3 arguments, received " << arity;
+            msg << "date.mk expects 3 arguments, received " << arity;
         else if (!is_int_sort(domain[0]) || !is_int_sort(domain[1]) || !is_int_sort(domain[2]))
-            msg << "mk-date expects Int arguments";
+            msg << "date.mk expects Int arguments";
         else
-            return m.mk_func_decl(symbol("mk-date"), arity, domain, m_date_sort,
+            return m.mk_func_decl(symbol("date.mk"), arity, domain, m_date_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_YEAR:
         if (arity != 1)
-            msg << "date-year expects 1 argument, received " << arity;
+            msg << "date.year expects 1 argument, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "date-year expects Date argument, got " << mk_pp(domain[0], m);
+            msg << "date.year expects Date argument, got " << mk_pp(domain[0], m);
         else
-            return m.mk_func_decl(symbol("date-year"), arity, domain, isort,
+            return m.mk_func_decl(symbol("date.year"), arity, domain, isort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_MONTH:
         if (arity != 1)
-            msg << "date-month expects 1 argument, received " << arity;
+            msg << "date.month expects 1 argument, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "date-month expects Date argument, got " << mk_pp(domain[0], m);
+            msg << "date.month expects Date argument, got " << mk_pp(domain[0], m);
         else
-            return m.mk_func_decl(symbol("date-month"), arity, domain, isort,
+            return m.mk_func_decl(symbol("date.month"), arity, domain, isort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_DAY:
         if (arity != 1)
-            msg << "date-day expects 1 argument, received " << arity;
+            msg << "date.day expects 1 argument, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "date-day expects Date argument, got " << mk_pp(domain[0], m);
+            msg << "date.day expects Date argument, got " << mk_pp(domain[0], m);
         else
-            return m.mk_func_decl(symbol("date-day"), arity, domain, isort,
+            return m.mk_func_decl(symbol("date.day"), arity, domain, isort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_MK:
         if (arity != 3)
-            msg << "mk-period expects 3 arguments, received " << arity;
+            msg << "period.mk expects 3 arguments, received " << arity;
         else if (!is_int_sort(domain[0]) || !is_int_sort(domain[1]) || !is_int_sort(domain[2]))
-            msg << "mk-period expects Int arguments";
+            msg << "period.mk expects Int arguments";
         else
-            return m.mk_func_decl(symbol("mk-period"), arity, domain, m_period_sort,
+            return m.mk_func_decl(symbol("period.mk"), arity, domain, m_period_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_YEARS:
         if (arity != 1)
-            msg << "p-years expects 1 argument, received " << arity;
+            msg << "period.years expects 1 argument, received " << arity;
         else if (domain[0] != m_period_sort)
-            msg << "p-years expects Period argument, got " << mk_pp(domain[0], m);
+            msg << "period.years expects Period argument, got " << mk_pp(domain[0], m);
         else
-            return m.mk_func_decl(symbol("p-years"), arity, domain, isort,
+            return m.mk_func_decl(symbol("period.years"), arity, domain, isort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_MONTHS:
         if (arity != 1)
-            msg << "p-months expects 1 argument, received " << arity;
+            msg << "period.months expects 1 argument, received " << arity;
         else if (domain[0] != m_period_sort)
-            msg << "p-months expects Period argument, got " << mk_pp(domain[0], m);
+            msg << "period.months expects Period argument, got " << mk_pp(domain[0], m);
         else
-            return m.mk_func_decl(symbol("p-months"), arity, domain, isort,
+            return m.mk_func_decl(symbol("period.months"), arity, domain, isort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_DAYS:
         if (arity != 1)
-            msg << "p-days expects 1 argument, received " << arity;
+            msg << "period.days expects 1 argument, received " << arity;
         else if (domain[0] != m_period_sort)
-            msg << "p-days expects Period argument, got " << mk_pp(domain[0], m);
+            msg << "period.days expects Period argument, got " << mk_pp(domain[0], m);
         else
-            return m.mk_func_decl(symbol("p-days"), arity, domain, isort,
+            return m.mk_func_decl(symbol("period.days"), arity, domain, isort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_ADD:
         if (arity != 2)
-            msg << "+ (Date, Period) expects 2 arguments, received " << arity;
+            msg << "date.add expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "+ expects Date as first argument, got " << mk_pp(domain[0], m);
+            msg << "date.add expects Date as first argument, got " << mk_pp(domain[0], m);
         else if (domain[1] != m_period_sort)
-            msg << "+ expects Period as second argument, got " << mk_pp(domain[1], m);
+            msg << "date.add expects Period as second argument, got " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("+"), arity, domain, m_date_sort,
+            return m.mk_func_decl(symbol("date.add"), arity, domain, m_date_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_SUB:
         if (arity != 2)
-            msg << "- (Date, Period) expects 2 arguments, received " << arity;
+            msg << "date.sub expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort)
-            msg << "- expects Date as first argument, got " << mk_pp(domain[0], m);
+            msg << "date.sub expects Date as first argument, got " << mk_pp(domain[0], m);
         else if (domain[1] != m_period_sort)
-            msg << "- expects Period as second argument, got " << mk_pp(domain[1], m);
+            msg << "date.sub expects Period as second argument, got " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("-"), arity, domain, m_date_sort,
+            return m.mk_func_decl(symbol("date.sub"), arity, domain, m_date_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_LT:
         if (arity != 2)
-            msg << "date_lt expects 2 arguments, received " << arity;
+            msg << "date.lt expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort || domain[1] != m_date_sort)
-            msg << "date_lt expects Date arguments";
+            msg << "date.lt expects Date arguments";
         else
-            return m.mk_func_decl(symbol("date_lt"), arity, domain, bsort,
+            return m.mk_func_decl(symbol("date.lt"), arity, domain, bsort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_LE:
         if (arity != 2)
-            msg << "date_le expects 2 arguments, received " << arity;
+            msg << "date.le expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort || domain[1] != m_date_sort)
-            msg << "date_le expects Date arguments";
+            msg << "date.le expects Date arguments";
         else
-            return m.mk_func_decl(symbol("date_le"), arity, domain, bsort,
+            return m.mk_func_decl(symbol("date.le"), arity, domain, bsort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_GT:
         if (arity != 2)
-            msg << "date_gt expects 2 arguments, received " << arity;
+            msg << "date.gt expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort || domain[1] != m_date_sort)
-            msg << "date_gt expects Date arguments";
+            msg << "date.gt expects Date arguments";
         else
-            return m.mk_func_decl(symbol("date_gt"), arity, domain, bsort,
+            return m.mk_func_decl(symbol("date.gt"), arity, domain, bsort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_DATE_GE:
         if (arity != 2)
-            msg << "date_ge expects 2 arguments, received " << arity;
+            msg << "date.ge expects 2 arguments, received " << arity;
         else if (domain[0] != m_date_sort || domain[1] != m_date_sort)
-            msg << "date_ge expects Date arguments";
+            msg << "date.ge expects Date arguments";
         else
-            return m.mk_func_decl(symbol("date_ge"), arity, domain, bsort,
+            return m.mk_func_decl(symbol("date.ge"), arity, domain, bsort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_ADD:
         if (arity != 2)
-            msg << "period_add expects 2 arguments, received " << arity;
+            msg << "period.add expects 2 arguments, received " << arity;
         else if (domain[0] != m_period_sort || domain[1] != m_period_sort)
-            msg << "period_add expects Period arguments";
+            msg << "period.add expects Period arguments, got " << mk_pp(domain[0], m) << " and " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("period_add"), arity, domain, m_period_sort,
+            return m.mk_func_decl(symbol("period.add"), arity, domain, m_period_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_SUB:
         if (arity != 2)
-            msg << "period_sub expects 2 arguments, received " << arity;
+            msg << "period.sub expects 2 arguments, received " << arity;
         else if (domain[0] != m_period_sort || domain[1] != m_period_sort)
-            msg << "period_sub expects Period arguments";
+            msg << "period.sub expects Period arguments, got " << mk_pp(domain[0], m) << " and " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("period_sub"), arity, domain, m_period_sort,
+            return m.mk_func_decl(symbol("period.sub"), arity, domain, m_period_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
     case OP_PERIOD_MUL:
         if (arity != 2)
-            msg << "period_mul expects 2 arguments, received " << arity;
+            msg << "period.mul expects 2 arguments, received " << arity;
         else if (domain[0] != m_period_sort)
-            msg << "period_mul expects Period as first argument, got " << mk_pp(domain[0], m);
+            msg << "period.mul expects Period as first argument, got " << mk_pp(domain[0], m);
         else if (!is_int_sort(domain[1]))
-            msg << "period_mul expects Int as second argument, got " << mk_pp(domain[1], m);
+            msg << "period.mul expects Int as second argument, got " << mk_pp(domain[1], m);
         else
-            return m.mk_func_decl(symbol("period_mul"), arity, domain, m_period_sort,
+            return m.mk_func_decl(symbol("period.mul"), arity, domain, m_period_sort,
                                   func_decl_info(m_family_id, k, 0, nullptr));
         m.raise_exception(msg.str());
 
@@ -238,27 +238,32 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
 }
 
 void date_decl_plugin::get_op_names(svector<builtin_name>& op_names, symbol const& logic) {
-    op_names.push_back(builtin_name("mk-date",    OP_DATE_MK));
-    op_names.push_back(builtin_name("mk-period",  OP_PERIOD_MK));
-    op_names.push_back(builtin_name("date-year",  OP_DATE_YEAR));
-    op_names.push_back(builtin_name("date-month", OP_DATE_MONTH));
-    op_names.push_back(builtin_name("date-day",   OP_DATE_DAY));
-    op_names.push_back(builtin_name("p-years",    OP_PERIOD_YEARS));
-    op_names.push_back(builtin_name("p-months",   OP_PERIOD_MONTHS));
-    op_names.push_back(builtin_name("p-days",     OP_PERIOD_DAYS));
-    // Register both named functions and overloaded operators for Date operations
-    op_names.push_back(builtin_name("date_add",   OP_DATE_ADD));
-    op_names.push_back(builtin_name("+",          OP_DATE_ADD));
-    op_names.push_back(builtin_name("date_sub",   OP_DATE_SUB));
-    op_names.push_back(builtin_name("-",          OP_DATE_SUB));
-    op_names.push_back(builtin_name("date_lt",    OP_DATE_LT));
-    op_names.push_back(builtin_name("date_le",    OP_DATE_LE));
-    op_names.push_back(builtin_name("date_gt",    OP_DATE_GT));
-    op_names.push_back(builtin_name("date_ge",    OP_DATE_GE));
-    // Period operations use named functions to avoid ambiguity with Date operations
-    op_names.push_back(builtin_name("period_add", OP_PERIOD_ADD));
-    op_names.push_back(builtin_name("period_sub", OP_PERIOD_SUB));
-    op_names.push_back(builtin_name("period_mul", OP_PERIOD_MUL));
+    // Primary names (dot-style)
+    op_names.push_back(builtin_name("date.mk",      OP_DATE_MK));
+    op_names.push_back(builtin_name("period.mk",    OP_PERIOD_MK));
+    op_names.push_back(builtin_name("date.year",    OP_DATE_YEAR));
+    op_names.push_back(builtin_name("date.month",   OP_DATE_MONTH));
+    op_names.push_back(builtin_name("date.day",     OP_DATE_DAY));
+    op_names.push_back(builtin_name("period.years",  OP_PERIOD_YEARS));
+    op_names.push_back(builtin_name("period.months", OP_PERIOD_MONTHS));
+    op_names.push_back(builtin_name("period.days",   OP_PERIOD_DAYS));
+    // Date arithmetic
+    op_names.push_back(builtin_name("date.add",    OP_DATE_ADD));
+    op_names.push_back(builtin_name("+d",          OP_DATE_ADD));
+    op_names.push_back(builtin_name("date.sub",    OP_DATE_SUB));
+    op_names.push_back(builtin_name("-d",          OP_DATE_SUB));
+    // Date comparisons
+    op_names.push_back(builtin_name("date.lt",     OP_DATE_LT));
+    op_names.push_back(builtin_name("date.le",     OP_DATE_LE));
+    op_names.push_back(builtin_name("date.gt",     OP_DATE_GT));
+    op_names.push_back(builtin_name("date.ge",     OP_DATE_GE));
+    // Period arithmetic
+    op_names.push_back(builtin_name("period.add",  OP_PERIOD_ADD));
+    op_names.push_back(builtin_name("+p",          OP_PERIOD_ADD));
+    op_names.push_back(builtin_name("period.sub",  OP_PERIOD_SUB));
+    op_names.push_back(builtin_name("-p",          OP_PERIOD_SUB));
+    op_names.push_back(builtin_name("period.mul",  OP_PERIOD_MUL));
+    op_names.push_back(builtin_name("*p",          OP_PERIOD_MUL));
 }
 
 void date_decl_plugin::get_sort_names(svector<builtin_name>& sort_names, symbol const& logic) {
@@ -322,7 +327,7 @@ expr* date_decl_plugin::get_some_value(sort* s) {
                           a.mk_numeral(rational(1), true),
                           a.mk_numeral(rational(1), true) };
         sort* domain[3] = { a.mk_int(), a.mk_int(), a.mk_int() };
-        func_decl* fd = m.mk_func_decl(symbol("mk-date"), 3, domain, m_date_sort,
+        func_decl* fd = m.mk_func_decl(symbol("date.mk"), 3, domain, m_date_sort,
                                         func_decl_info(m_family_id, OP_DATE_MK, 0, nullptr));
         return m.mk_app(fd, 3, args);
     }
@@ -332,7 +337,7 @@ expr* date_decl_plugin::get_some_value(sort* s) {
                           a.mk_numeral(rational(0), true),
                           a.mk_numeral(rational(0), true) };
         sort* domain[3] = { a.mk_int(), a.mk_int(), a.mk_int() };
-        func_decl* fd = m.mk_func_decl(symbol("mk-period"), 3, domain, m_period_sort,
+        func_decl* fd = m.mk_func_decl(symbol("period.mk"), 3, domain, m_period_sort,
                                         func_decl_info(m_family_id, OP_PERIOD_MK, 0, nullptr));
         return m.mk_app(fd, 3, args);
     }

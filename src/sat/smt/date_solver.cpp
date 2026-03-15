@@ -35,9 +35,9 @@ namespace date {
         sort* ds = m_plugin.date_sort();
         sort* is = m_autil.mk_int();
         sort* domain[1] = { ds };
-        m_date_year  = m.mk_func_decl(symbol("date-year"),  1, domain, is);
-        m_date_month = m.mk_func_decl(symbol("date-month"), 1, domain, is);
-        m_date_day   = m.mk_func_decl(symbol("date-day"),   1, domain, is);
+        m_date_year  = m.mk_func_decl(symbol("date.year"),  1, domain, is);
+        m_date_month = m.mk_func_decl(symbol("date.month"), 1, domain, is);
+        m_date_day   = m.mk_func_decl(symbol("date.day"),   1, domain, is);
     }
 
     app_ref solver::mk_date_year(expr* d) {
@@ -57,21 +57,21 @@ namespace date {
 
     app_ref solver::mk_period_years(expr* p) {
         sort* domain[1] = { m_plugin.period_sort() };
-        func_decl* fd = m.mk_func_decl(symbol("p-years"), 1, domain, m_autil.mk_int(),
+        func_decl* fd = m.mk_func_decl(symbol("period.years"), 1, domain, m_autil.mk_int(),
                                         func_decl_info(get_id(), OP_PERIOD_YEARS, 0, nullptr));
         return app_ref(m.mk_app(fd, p), m);
     }
 
     app_ref solver::mk_period_months(expr* p) {
         sort* domain[1] = { m_plugin.period_sort() };
-        func_decl* fd = m.mk_func_decl(symbol("p-months"), 1, domain, m_autil.mk_int(),
+        func_decl* fd = m.mk_func_decl(symbol("period.months"), 1, domain, m_autil.mk_int(),
                                         func_decl_info(get_id(), OP_PERIOD_MONTHS, 0, nullptr));
         return app_ref(m.mk_app(fd, p), m);
     }
 
     app_ref solver::mk_period_days(expr* p) {
         sort* domain[1] = { m_plugin.period_sort() };
-        func_decl* fd = m.mk_func_decl(symbol("p-days"), 1, domain, m_autil.mk_int(),
+        func_decl* fd = m.mk_func_decl(symbol("period.days"), 1, domain, m_autil.mk_int(),
                                         func_decl_info(get_id(), OP_PERIOD_DAYS, 0, nullptr));
         return app_ref(m.mk_app(fd, p), m);
     }
@@ -79,7 +79,7 @@ namespace date {
     app_ref solver::mk_mk_date(expr* y, expr* mo, expr* d) {
         sort* is = m_autil.mk_int();
         sort* domain[3] = { is, is, is };
-        func_decl* fd = m.mk_func_decl(symbol("mk-date"), 3, domain, m_plugin.date_sort(),
+        func_decl* fd = m.mk_func_decl(symbol("date.mk"), 3, domain, m_plugin.date_sort(),
                                         func_decl_info(get_id(), OP_DATE_MK, 0, nullptr));
         expr* args[3] = { y, mo, d };
         return app_ref(m.mk_app(fd, 3, args), m);
@@ -88,7 +88,7 @@ namespace date {
     app_ref solver::mk_mk_period(expr* y, expr* mo, expr* d) {
         sort* is = m_autil.mk_int();
         sort* domain[3] = { is, is, is };
-        func_decl* fd = m.mk_func_decl(symbol("mk-period"), 3, domain, m_plugin.period_sort(),
+        func_decl* fd = m.mk_func_decl(symbol("period.mk"), 3, domain, m_plugin.period_sort(),
                                         func_decl_info(get_id(), OP_PERIOD_MK, 0, nullptr));
         expr* args[3] = { y, mo, d };
         return app_ref(m.mk_app(fd, 3, args), m);
@@ -392,22 +392,85 @@ namespace date {
     // Model building
     // -------------------------------------------------------
 
+    // Walk the equivalence class of n to find a mk-date or mk-period constructor.
+    euf::enode* solver::find_constructor(euf::enode* n) {
+        sort* s = n->get_expr()->get_sort();
+        bool want_date = m_plugin.is_date(s);
+        bool want_period = m_plugin.is_period(s);
+        if (!want_date && !want_period)
+            return nullptr;
+        euf::enode* root = n->get_root();
+        euf::enode* curr = root;
+        do {
+            expr* ce = curr->get_expr();
+            if (want_date && m_plugin.is_mk_date(ce))
+                return curr;
+            if (want_period && m_plugin.is_mk_period(ce))
+                return curr;
+            curr = curr->get_next();
+        } while (curr != root);
+        return nullptr;
+    }
+
     void solver::add_value(euf::enode* n, model& mdl, expr_ref_vector& values) {
         expr* e = n->get_expr();
-        if (m_plugin.is_date(e->get_sort())) {
+        sort* s = e->get_sort();
+        if (!m_plugin.is_date(s) && !m_plugin.is_period(s))
+            return;
+
+        // Find a constructor (mk-date / mk-period) in the equivalence class.
+        euf::enode* con = find_constructor(n);
+        if (con && con->num_args() == 3) {
+            expr* y_val = values.get(con->get_arg(0)->get_root_id(), nullptr);
+            expr* m_val = values.get(con->get_arg(1)->get_root_id(), nullptr);
+            expr* d_val = values.get(con->get_arg(2)->get_root_id(), nullptr);
+            if (y_val && m_val && d_val) {
+                if (m_plugin.is_date(s))
+                    values.setx(n->get_root_id(), mk_mk_date(y_val, m_val, d_val));
+                else
+                    values.setx(n->get_root_id(), mk_mk_period(y_val, m_val, d_val));
+                return;
+            }
+        }
+
+        // Fallback to default value.
+        if (m_plugin.is_date(s))
             values.setx(n->get_root_id(), m_plugin.mk_default_date(m));
-        }
-        else if (m_plugin.is_period(e->get_sort())) {
+        else
             values.setx(n->get_root_id(), m_plugin.mk_default_period(m));
-        }
     }
 
     bool solver::add_dep(euf::enode* n, top_sort<euf::enode>& dep) {
+        expr* e = n->get_expr();
+        sort* s = e->get_sort();
+        if (!m_plugin.is_date(s) && !m_plugin.is_period(s))
+            return false;
+
+        // Find a constructor in the equivalence class and depend on its args.
+        euf::enode* con = find_constructor(n);
+        if (con && con->num_args() == 3) {
+            for (euf::enode* arg : euf::enode_args(con))
+                dep.add(n, arg->get_root());
+            return true;
+        }
+
         dep.insert(n, nullptr);
         return true;
     }
 
     bool solver::include_func_interp(func_decl* f) const {
+        // Period selectors (p-years, p-months, p-days) are in our family.
+        // Include their interpretation so the model evaluator can handle them.
+        if (f->get_family_id() == get_id()) {
+            switch (f->get_decl_kind()) {
+            case OP_PERIOD_YEARS:
+            case OP_PERIOD_MONTHS:
+            case OP_PERIOD_DAYS:
+                return true;
+            default:
+                break;
+            }
+        }
         return false;
     }
 

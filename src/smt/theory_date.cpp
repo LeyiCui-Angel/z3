@@ -38,9 +38,9 @@ namespace smt {
         sort* ds = m_plugin.date_sort();
         sort* is = m_autil.mk_int();
         sort* domain[1] = { ds };
-        m_date_year  = m.mk_func_decl(symbol("date-year"),  1, domain, is);
-        m_date_month = m.mk_func_decl(symbol("date-month"), 1, domain, is);
-        m_date_day   = m.mk_func_decl(symbol("date-day"),   1, domain, is);
+        m_date_year  = m.mk_func_decl(symbol("date.year"),  1, domain, is);
+        m_date_month = m.mk_func_decl(symbol("date.month"), 1, domain, is);
+        m_date_day   = m.mk_func_decl(symbol("date.day"),   1, domain, is);
     }
 
     app_ref theory_date::mk_date_year(expr* d) {
@@ -60,21 +60,21 @@ namespace smt {
 
     app_ref theory_date::mk_period_years(expr* p) {
         sort* domain[1] = { m_plugin.period_sort() };
-        func_decl* fd = m.mk_func_decl(symbol("p-years"), 1, domain, m_autil.mk_int(),
+        func_decl* fd = m.mk_func_decl(symbol("period.years"), 1, domain, m_autil.mk_int(),
                                         func_decl_info(get_family_id(), OP_PERIOD_YEARS, 0, nullptr));
         return app_ref(m.mk_app(fd, p), m);
     }
 
     app_ref theory_date::mk_period_months(expr* p) {
         sort* domain[1] = { m_plugin.period_sort() };
-        func_decl* fd = m.mk_func_decl(symbol("p-months"), 1, domain, m_autil.mk_int(),
+        func_decl* fd = m.mk_func_decl(symbol("period.months"), 1, domain, m_autil.mk_int(),
                                         func_decl_info(get_family_id(), OP_PERIOD_MONTHS, 0, nullptr));
         return app_ref(m.mk_app(fd, p), m);
     }
 
     app_ref theory_date::mk_period_days(expr* p) {
         sort* domain[1] = { m_plugin.period_sort() };
-        func_decl* fd = m.mk_func_decl(symbol("p-days"), 1, domain, m_autil.mk_int(),
+        func_decl* fd = m.mk_func_decl(symbol("period.days"), 1, domain, m_autil.mk_int(),
                                         func_decl_info(get_family_id(), OP_PERIOD_DAYS, 0, nullptr));
         return app_ref(m.mk_app(fd, p), m);
     }
@@ -82,7 +82,7 @@ namespace smt {
     app_ref theory_date::mk_mk_date(expr* y, expr* mo, expr* d) {
         sort* is = m_autil.mk_int();
         sort* domain[3] = { is, is, is };
-        func_decl* fd = m.mk_func_decl(symbol("mk-date"), 3, domain, m_plugin.date_sort(),
+        func_decl* fd = m.mk_func_decl(symbol("date.mk"), 3, domain, m_plugin.date_sort(),
                                         func_decl_info(get_family_id(), OP_DATE_MK, 0, nullptr));
         expr* args[3] = { y, mo, d };
         return app_ref(m.mk_app(fd, 3, args), m);
@@ -91,7 +91,7 @@ namespace smt {
     app_ref theory_date::mk_mk_period(expr* y, expr* mo, expr* d) {
         sort* is = m_autil.mk_int();
         sort* domain[3] = { is, is, is };
-        func_decl* fd = m.mk_func_decl(symbol("mk-period"), 3, domain, m_plugin.period_sort(),
+        func_decl* fd = m.mk_func_decl(symbol("period.mk"), 3, domain, m_plugin.period_sort(),
                                         func_decl_info(get_family_id(), OP_PERIOD_MK, 0, nullptr));
         expr* args[3] = { y, mo, d };
         return app_ref(m.mk_app(fd, 3, args), m);

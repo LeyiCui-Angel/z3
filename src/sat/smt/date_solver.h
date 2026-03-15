@@ -66,6 +66,8 @@ namespace date {
         bool has_axiom(expr* e) { return m_axiomatized.contains(e); }
         void mark_axiomatized(expr* e) { m_axiomatized.insert(e); }
 
+        euf::enode* find_constructor(euf::enode* n);
+
         void pop_core(unsigned n) override;
 
         // Internalization
