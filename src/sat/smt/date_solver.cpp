@@ -190,18 +190,20 @@ namespace date {
         // Epoch days since 2000-03-01 → civil (y,m,d)
         // Howard Hinnant's chrono-compatible algorithm
 
+        // Convert to absolute days since 0000-03-01
+        expr_ref z(m_autil.mk_add(epoch, m_autil.mk_int(730485)), m);
         expr_ref three(m_autil.mk_int(3), m);
 
-        // 400-year cycles
-        expr_ref q400(m_autil.mk_idiv(epoch, m_autil.mk_int(146097)), m);
-        expr_ref r400(m_autil.mk_mod(epoch, m_autil.mk_int(146097)), m);
+        // 400-year cycles (era)
+        expr_ref era(m_autil.mk_idiv(z, m_autil.mk_int(146097)), m);
+        expr_ref doe(m_autil.mk_sub(z, m_autil.mk_mul(era, m_autil.mk_int(146097))), m);
 
         // 100-year blocks (clamp: max 3)
-        expr_ref q100_raw(m_autil.mk_idiv(r400, m_autil.mk_int(36524)), m);
+        expr_ref q100_raw(m_autil.mk_idiv(doe, m_autil.mk_int(36524)), m);
         expr_ref q100(m.mk_ite(
-            m.mk_not(m_autil.mk_le(q100_raw, three)), // >= 4
+            m.mk_not(m_autil.mk_le(q100_raw, three)),
             three, q100_raw), m);
-        expr_ref r100(m_autil.mk_sub(r400, m_autil.mk_mul(q100, m_autil.mk_int(36524))), m);
+        expr_ref r100(m_autil.mk_sub(doe, m_autil.mk_mul(q100, m_autil.mk_int(36524))), m);
 
         // 4-year blocks
         expr_ref q4(m_autil.mk_idiv(r100, m_autil.mk_int(1461)), m);
@@ -210,15 +212,15 @@ namespace date {
         // 1-year blocks (clamp: max 3)
         expr_ref q1_raw(m_autil.mk_idiv(r4, m_autil.mk_int(365)), m);
         expr_ref q1(m.mk_ite(
-            m.mk_not(m_autil.mk_le(q1_raw, three)), // >= 4
+            m.mk_not(m_autil.mk_le(q1_raw, three)),
             three, q1_raw), m);
         expr_ref r1(m_autil.mk_sub(r4, m_autil.mk_mul(q1, m_autil.mk_int(365))), m);
 
-        // March-based year
-        expr_ref y(m_autil.mk_add(m_autil.mk_int(2000),
-            m_autil.mk_add(m_autil.mk_mul(q400, m_autil.mk_int(400)),
-                m_autil.mk_add(m_autil.mk_mul(q100, m_autil.mk_int(100)),
-                    m_autil.mk_add(m_autil.mk_mul(q4, m_autil.mk_int(4)), q1)))), m);
+        // March-based year = era*400 + yoe (no +2000 offset, z is absolute)
+        expr_ref yoe(m_autil.mk_add(
+            m_autil.mk_mul(q100, m_autil.mk_int(100)),
+            m_autil.mk_add(m_autil.mk_mul(q4, m_autil.mk_int(4)), q1)), m);
+        expr_ref y(m_autil.mk_add(m_autil.mk_mul(era, m_autil.mk_int(400)), yoe), m);
 
         // Month from day-of-year: mp = (5*r1 + 2) / 153
         expr_ref mp(m_autil.mk_idiv(
@@ -236,7 +238,7 @@ namespace date {
         // Calendar month: mp+3, wrap Jan(13)/Feb(14) → 1/2
         expr_ref m_raw(m_autil.mk_add(mp, m_autil.mk_int(3)), m);
         out_m = expr_ref(m.mk_ite(
-            m.mk_not(m_autil.mk_le(m_raw, m_autil.mk_int(12))), // > 12
+            m.mk_not(m_autil.mk_le(m_raw, m_autil.mk_int(12))),
             m_autil.mk_sub(m_raw, m_autil.mk_int(12)),
             m_raw), m);
 
@@ -247,19 +249,136 @@ namespace date {
             y), m);
     }
 
+    // -------------------------------------------------------
+    // Concrete C++ calendar arithmetic
+    // -------------------------------------------------------
+
+    bool solver::cc_is_leap(int y) {
+        return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    }
+
+    int solver::cc_days_in_month(int y, int m) {
+        static const int days[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+        if (m < 1 || m > 12) return 30;
+        if (m == 2 && cc_is_leap(y)) return 29;
+        return days[m];
+    }
+
+    int solver::cc_ymd_to_epoch(int y, int m, int d) {
+        // Civil (y,m,d) -> epoch days since 2000-03-01 (Hinnant algorithm)
+        int y_adj = (m <= 2) ? y - 1 : y;
+        int m_adj = (m <= 2) ? m + 12 : m;
+        int mp = m_adj - 3;
+        int era = (y_adj >= 0 ? y_adj : y_adj - 399) / 400;
+        int yoe = y_adj - era * 400;
+        int doy = (153 * mp + 2) / 5 + (d - 1);
+        int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        return era * 146097 + doe - 730485;
+    }
+
+    void solver::cc_epoch_to_ymd(int epoch, int& y, int& m, int& d) {
+        // Epoch days since 2000-03-01 -> civil (y,m,d) (Hinnant algorithm)
+        int z = epoch + 730485;  // absolute days since 0000-03-01
+        int era = (z >= 0 ? z : z - 146096) / 146097;
+        int doe = z - era * 146097;  // day-of-era [0, 146096]
+        // Decompose doe into year-of-era
+        int q100 = doe / 36524;
+        if (q100 > 3) q100 = 3;  // clamp for last day of 400-year cycle
+        int r100 = doe - q100 * 36524;
+        int q4 = r100 / 1461;
+        int r4 = r100 % 1461;
+        int q1 = r4 / 365;
+        if (q1 > 3) q1 = 3;  // clamp for last day of 4-year cycle
+        int r1 = r4 - q1 * 365;  // day-of-year [0, 365]
+        int yoe = q100 * 100 + q4 * 4 + q1;
+        int y_march = era * 400 + yoe;  // March-based year
+        int mp = (5 * r1 + 2) / 153;
+        d = r1 - (153 * mp + 2) / 5 + 1;
+        int m_raw = mp + 3;
+        m = (m_raw > 12) ? m_raw - 12 : m_raw;
+        y = (m <= 2) ? y_march + 1 : y_march;
+    }
+
+    void solver::cc_date_add(int dy, int dm, int dd, int py, int pm, int pd,
+                              int& ry, int& rm, int& rd) {
+        // Step 1: month normalization
+        int raw_m = dm + py * 12 + pm;
+        int t = raw_m - 1;
+        // Euclidean div/mod (matching Z3 semantics: mod >= 0 for positive divisor)
+        int q = (t >= 0) ? t / 12 : (t - 11) / 12;
+        int r = t - q * 12;
+        int ny = dy + q;
+        int nm = r + 1;
+        // Step 2: EOM clamp
+        int dim = cc_days_in_month(ny, nm);
+        int cd = (dd > dim) ? dim : dd;
+        if (cd < 1) cd = 1;
+        // Step 3: day carry via epoch
+        if (pd == 0) {
+            ry = ny; rm = nm; rd = cd;
+        } else {
+            int ep = cc_ymd_to_epoch(ny, nm, cd) + pd;
+            cc_epoch_to_ymd(ep, ry, rm, rd);
+        }
+    }
+
+    bool solver::try_concrete_date_add(expr* term, expr* d, expr* p, bool negate_period) {
+        // Check if d is date.mk with numeral args and p is period.mk with numeral args
+        rational v;
+        int dy, dm, dd, py, pm, pd;
+
+        // Extract date components
+        if (m_plugin.is_mk_date(d)) {
+            app* da = to_app(d);
+            if (!m_autil.is_numeral(da->get_arg(0), v)) return false;
+            dy = v.get_int32();
+            if (!m_autil.is_numeral(da->get_arg(1), v)) return false;
+            dm = v.get_int32();
+            if (!m_autil.is_numeral(da->get_arg(2), v)) return false;
+            dd = v.get_int32();
+        } else {
+            return false;
+        }
+
+        // Extract period components
+        if (m_plugin.is_mk_period(d)) {
+            // d is actually a period — shouldn't happen, but guard
+            return false;
+        }
+        if (m_plugin.is_mk_period(p)) {
+            app* pa = to_app(p);
+            if (!m_autil.is_numeral(pa->get_arg(0), v)) return false;
+            py = v.get_int32();
+            if (!m_autil.is_numeral(pa->get_arg(1), v)) return false;
+            pm = v.get_int32();
+            if (!m_autil.is_numeral(pa->get_arg(2), v)) return false;
+            pd = v.get_int32();
+        } else {
+            return false;
+        }
+
+        if (negate_period) { py = -py; pm = -pm; pd = -pd; }
+
+        int ry, rm, rd;
+        cc_date_add(dy, dm, dd, py, pm, pd, ry, rm, rd);
+
+        // Assert: result = date.mk(ry, rm, rd)
+        app_ref result = mk_mk_date(m_autil.mk_int(ry), m_autil.mk_int(rm), m_autil.mk_int(rd));
+        assert_eq_axiom(term, result);
+        // Selectors follow from mk_date axioms (axiomatize_mk_date will fire on the result)
+        return true;
+    }
+
     void solver::assert_date_validity(expr* y, expr* mo, expr* d) {
-        // 1 <= month <= 12
-        expr_ref le1(m_autil.mk_le(m_autil.mk_int(1), mo), m);
-        expr_ref le2(m_autil.mk_le(mo, m_autil.mk_int(12)), m);
-        add_unit(mk_literal(le1));
-        add_unit(mk_literal(le2));
-        // 1 <= day <= days_in_month(year, month)
+        // Symbolic validity constraints using the ITE-based days_in_month.
+        // When y and mo are selector terms with concrete values known to the
+        // arithmetic solver, it can evaluate the ITE and detect violations.
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), mo)));
+        add_unit(mk_literal(m_autil.mk_le(mo, m_autil.mk_int(12))));
         add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), d)));
         add_unit(mk_literal(m_autil.mk_le(d, mk_days_in_month(y, mo))));
-        // 1900 <= year <= 2100
         add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1900), y)));
         add_unit(mk_literal(m_autil.mk_le(y, m_autil.mk_int(2100))));
-        // Boundary: y=1900 → m>=3, y=2100 → m<=2
         sat::literal y_ne_1900 = mk_literal(m.mk_not(m.mk_eq(y, m_autil.mk_int(1900))));
         sat::literal m_ge_3 = mk_literal(m_autil.mk_le(m_autil.mk_int(3), mo));
         add_clause(y_ne_1900, m_ge_3);
@@ -299,8 +418,20 @@ namespace date {
         assert_eq_axiom(mk_date_year(term),  y);
         assert_eq_axiom(mk_date_month(term), mo);
         assert_eq_axiom(mk_date_day(term),   d);
-        // Validity constraints
-        assert_date_validity(y, mo, d);
+        // Validity using selectors — arithmetic solver can reason about
+        // day(term) ≤ dim when year(term) and month(term) are known
+        app_ref sy = mk_date_year(term);
+        app_ref sm = mk_date_month(term);
+        app_ref sd = mk_date_day(term);
+        // Direct simple bounds that arithmetic handles without ITE
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), sy)));
+        add_unit(mk_literal(m_autil.mk_le(sy, m_autil.mk_int(2100))));
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1900), sy)));
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), sm)));
+        add_unit(mk_literal(m_autil.mk_le(sm, m_autil.mk_int(12))));
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), sd)));
+        add_unit(mk_literal(m_autil.mk_le(sd, m_autil.mk_int(31))));  // coarse bound
+        assert_date_validity(sy, sm, sd);
     }
 
     void solver::axiomatize_mk_period(expr* term) {
@@ -322,6 +453,10 @@ namespace date {
         expr* d = a->get_arg(0);
         expr* p = a->get_arg(1);
 
+        // Fast path: if all inputs are concrete, compute in C++
+        if (try_concrete_date_add(term, d, p, false))
+            return;
+
         // Extract components
         app_ref dy = mk_date_year(d);
         app_ref dm = mk_date_month(d);
@@ -331,7 +466,6 @@ namespace date {
         app_ref pd = mk_period_days(p);
 
         // Step 1: Month normalization
-        // raw_m = month(d) + years(p)*12 + months(p)
         expr_ref total_period_months(m_autil.mk_add(m_autil.mk_mul(py, m_autil.mk_int(12)), pm), m);
         expr_ref raw_m(m_autil.mk_add(dm, total_period_months), m);
         expr_ref ny(m), nm(m);
@@ -340,13 +474,20 @@ namespace date {
         // Step 2: EOM clamp
         expr_ref cd = mk_eom_clamp(ny, nm, dd);
 
-        // Step 3: Day addition via epoch conversion
-        expr_ref base_epoch = mk_ymd_to_epoch(ny, nm, cd);
-        expr_ref result_epoch(m_autil.mk_add(base_epoch, pd), m);
+        // Check if days(p) is concretely zero — skip epoch conversion
+        rational pd_val;
+        bool pd_is_zero = m_autil.is_numeral(pd, pd_val) && pd_val.is_zero();
 
-        // Decode result epoch to (year, month, day)
         expr_ref ry(m), rm(m), rd(m);
-        mk_epoch_to_ymd(result_epoch, ry, rm, rd);
+        if (pd_is_zero) {
+            // No day carry needed — result is just (ny, nm, cd)
+            ry = ny; rm = nm; rd = cd;
+        } else {
+            // Step 3: Day addition via epoch conversion
+            expr_ref base_epoch = mk_ymd_to_epoch(ny, nm, cd);
+            expr_ref result_epoch(m_autil.mk_add(base_epoch, pd), m);
+            mk_epoch_to_ymd(result_epoch, ry, rm, rd);
+        }
 
         // Assert result selectors
         assert_eq_axiom(mk_date_year(term), ry);
@@ -363,6 +504,10 @@ namespace date {
         app* a = to_app(term);
         expr* d = a->get_arg(0);
         expr* p = a->get_arg(1);
+
+        // Fast path: if all inputs are concrete, compute in C++
+        if (try_concrete_date_add(term, d, p, true))
+            return;
 
         // date.sub(d, p) = date.add(d, -p)
         app_ref py = mk_period_years(p);
@@ -388,12 +533,18 @@ namespace date {
         // EOM clamp
         expr_ref cd = mk_eom_clamp(ny, nm, dd);
 
-        // Day addition via epoch
-        expr_ref base_epoch = mk_ymd_to_epoch(ny, nm, cd);
-        expr_ref result_epoch(m_autil.mk_add(base_epoch, neg_pd), m);
+        // Check if days(p) is concretely zero — skip epoch conversion
+        rational pd_val;
+        bool pd_is_zero = m_autil.is_numeral(pd, pd_val) && pd_val.is_zero();
 
         expr_ref ry(m), rm(m), rd(m);
-        mk_epoch_to_ymd(result_epoch, ry, rm, rd);
+        if (pd_is_zero) {
+            ry = ny; rm = nm; rd = cd;
+        } else {
+            expr_ref base_epoch = mk_ymd_to_epoch(ny, nm, cd);
+            expr_ref result_epoch(m_autil.mk_add(base_epoch, neg_pd), m);
+            mk_epoch_to_ymd(result_epoch, ry, rm, rd);
+        }
 
         assert_eq_axiom(mk_date_year(term), ry);
         assert_eq_axiom(mk_date_month(term), rm);

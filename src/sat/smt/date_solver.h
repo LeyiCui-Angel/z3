@@ -72,6 +72,15 @@ namespace date {
         void mk_epoch_to_ymd(expr* epoch, expr_ref& out_y, expr_ref& out_m, expr_ref& out_d);
         void assert_date_validity(expr* y, expr* mo, expr* d);
 
+        // Concrete C++ calendar arithmetic (no Z3 expressions)
+        static bool cc_is_leap(int y);
+        static int  cc_days_in_month(int y, int m);
+        static int  cc_ymd_to_epoch(int y, int m, int d);
+        static void cc_epoch_to_ymd(int epoch, int& y, int& m, int& d);
+        static void cc_date_add(int dy, int dm, int dd, int py, int pm, int pd,
+                                int& ry, int& rm, int& rd);
+        bool try_concrete_date_add(expr* term, expr* d, expr* p, bool negate_period);
+
         bool has_axiom(expr* e) { return m_axiomatized.contains(e); }
         void mark_axiomatized(expr* e) { m_axiomatized.insert(e); }
 
