@@ -25,7 +25,8 @@ namespace smt {
         m_date_month(ctx.get_manager()),
         m_date_day(ctx.get_manager()),
         m_axiom_trail(ctx.get_manager())
-    {}
+    {
+    }
 
     theory_date::~theory_date() {}
 

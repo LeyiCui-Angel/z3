@@ -63,6 +63,15 @@ namespace date {
         void axiomatize_date_reconstruction(expr* e);
         void axiomatize_period_reconstruction(expr* e);
 
+        // Calendar arithmetic expression builders
+        expr_ref mk_is_leap(expr* y);
+        expr_ref mk_days_in_month(expr* y, expr* mo);
+        void mk_normalize_month(expr* base_y, expr* raw_m, expr_ref& out_y, expr_ref& out_m);
+        expr_ref mk_eom_clamp(expr* y, expr* mo, expr* d);
+        expr_ref mk_ymd_to_epoch(expr* y, expr* mo, expr* d);
+        void mk_epoch_to_ymd(expr* epoch, expr_ref& out_y, expr_ref& out_m, expr_ref& out_d);
+        void assert_date_validity(expr* y, expr* mo, expr* d);
+
         bool has_axiom(expr* e) { return m_axiomatized.contains(e); }
         void mark_axiomatized(expr* e) { m_axiomatized.insert(e); }
 

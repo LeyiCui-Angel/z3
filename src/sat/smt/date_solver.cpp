@@ -10,6 +10,11 @@ Abstract:
     Theory solver for calendar dates and periods (new SAT/SMT core).
     Reduces date/period operations to integer arithmetic via eager axiom instantiation.
 
+    Date semantics follow the DateSAT framework:
+    - Valid dates: year 1900-2100, month 1-12, day 1-dim(y,m)
+    - date.add: month normalization + EOM clamp + epoch-based day carry
+    - Comparisons: lexicographic on (year, month, day) for valid dates
+
 --*/
 #include "sat/smt/date_solver.h"
 #include "sat/smt/euf_solver.h"
@@ -24,7 +29,8 @@ namespace date {
         m_date_year(m),
         m_date_month(m),
         m_date_day(m)
-    {}
+    {
+    }
 
     // -------------------------------------------------------
     // Internal date selector functions (not user-facing)
@@ -35,9 +41,12 @@ namespace date {
         sort* ds = m_plugin.date_sort();
         sort* is = m_autil.mk_int();
         sort* domain[1] = { ds };
-        m_date_year  = m.mk_func_decl(symbol("date.year"),  1, domain, is);
-        m_date_month = m.mk_func_decl(symbol("date.month"), 1, domain, is);
-        m_date_day   = m.mk_func_decl(symbol("date.day"),   1, domain, is);
+        m_date_year  = m.mk_func_decl(symbol("date.year"),  1, domain, is,
+                                        func_decl_info(get_id(), OP_DATE_YEAR, 0, nullptr));
+        m_date_month = m.mk_func_decl(symbol("date.month"), 1, domain, is,
+                                        func_decl_info(get_id(), OP_DATE_MONTH, 0, nullptr));
+        m_date_day   = m.mk_func_decl(symbol("date.day"),   1, domain, is,
+                                        func_decl_info(get_id(), OP_DATE_DAY, 0, nullptr));
     }
 
     app_ref solver::mk_date_year(expr* d) {
@@ -95,6 +104,171 @@ namespace date {
     }
 
     // -------------------------------------------------------
+    // Calendar arithmetic expression builders
+    // -------------------------------------------------------
+
+    expr_ref solver::mk_is_leap(expr* y) {
+        // (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+        expr_ref zero(m_autil.mk_int(0), m);
+        expr_ref y4(m_autil.mk_mod(y, m_autil.mk_int(4)), m);
+        expr_ref y100(m_autil.mk_mod(y, m_autil.mk_int(100)), m);
+        expr_ref y400(m_autil.mk_mod(y, m_autil.mk_int(400)), m);
+        expr_ref eq4(m.mk_eq(y4, zero), m);
+        expr_ref neq100(m.mk_not(m.mk_eq(y100, zero)), m);
+        expr_ref eq400(m.mk_eq(y400, zero), m);
+        return expr_ref(m.mk_or(m.mk_and(eq4, neq100), eq400), m);
+    }
+
+    expr_ref solver::mk_days_in_month(expr* y, expr* mo) {
+        // m==2 → (leap?29:28), m∈{4,6,9,11}→30, else→31
+        expr_ref leap_br(m.mk_ite(mk_is_leap(y), m_autil.mk_int(29), m_autil.mk_int(28)), m);
+        expr_ref is_30(m.mk_or(
+            m.mk_or(m.mk_eq(mo, m_autil.mk_int(4)), m.mk_eq(mo, m_autil.mk_int(6))),
+            m.mk_or(m.mk_eq(mo, m_autil.mk_int(9)), m.mk_eq(mo, m_autil.mk_int(11)))), m);
+        return expr_ref(m.mk_ite(m.mk_eq(mo, m_autil.mk_int(2)), leap_br,
+                                 m.mk_ite(is_30, m_autil.mk_int(30), m_autil.mk_int(31))), m);
+    }
+
+    void solver::mk_normalize_month(expr* base_y, expr* raw_m,
+                                     expr_ref& out_y, expr_ref& out_m) {
+        // raw_m is 1-based month (may be outside [1,12])
+        // t = raw_m - 1 (0-based)
+        // out_y = base_y + t div 12
+        // out_m = t mod 12 + 1
+        // Z3 Euclidean div/mod with positive divisor: mod always >= 0
+        expr_ref t(m_autil.mk_sub(raw_m, m_autil.mk_int(1)), m);
+        expr_ref q(m_autil.mk_idiv(t, m_autil.mk_int(12)), m);
+        expr_ref r(m_autil.mk_mod(t, m_autil.mk_int(12)), m);
+        out_y = expr_ref(m_autil.mk_add(base_y, q), m);
+        out_m = expr_ref(m_autil.mk_add(r, m_autil.mk_int(1)), m);
+    }
+
+    expr_ref solver::mk_eom_clamp(expr* y, expr* mo, expr* d) {
+        // min(d, days_in_month(y, m))
+        expr_ref dim = mk_days_in_month(y, mo);
+        // ITE(not(d <= dim), dim, d)  i.e. ITE(d > dim, dim, d)
+        return expr_ref(m.mk_ite(m.mk_not(m_autil.mk_le(d, dim)), dim, d), m);
+    }
+
+    expr_ref solver::mk_ymd_to_epoch(expr* y, expr* mo, expr* d) {
+        // Civil (y,m,d) → epoch days since 2000-03-01
+        // Howard Hinnant's chrono-compatible algorithm
+        expr_ref two(m_autil.mk_int(2), m);
+        expr_ref m_le_2(m_autil.mk_le(mo, two), m);
+
+        // Shift Jan/Feb into previous March-based year
+        expr_ref y_adj(m.mk_ite(m_le_2, m_autil.mk_sub(y, m_autil.mk_int(1)), y), m);
+        expr_ref m_adj(m.mk_ite(m_le_2, m_autil.mk_add(mo, m_autil.mk_int(12)), mo), m);
+        expr_ref mp(m_autil.mk_sub(m_adj, m_autil.mk_int(3)), m); // 0..11
+
+        // Era decomposition
+        expr_ref i400(m_autil.mk_int(400), m);
+        expr_ref era(m_autil.mk_idiv(y_adj, i400), m);
+        expr_ref yoe(m_autil.mk_sub(y_adj, m_autil.mk_mul(era, i400)), m); // 0..399
+
+        // Day of year within March-based year
+        expr_ref doy(m_autil.mk_add(
+            m_autil.mk_idiv(
+                m_autil.mk_add(m_autil.mk_mul(m_autil.mk_int(153), mp), m_autil.mk_int(2)),
+                m_autil.mk_int(5)),
+            m_autil.mk_sub(d, m_autil.mk_int(1))), m);
+
+        // Day of era: yoe*365 + yoe/4 - yoe/100 + doy
+        expr_ref doe(m_autil.mk_add(
+            m_autil.mk_sub(
+                m_autil.mk_add(m_autil.mk_mul(yoe, m_autil.mk_int(365)),
+                               m_autil.mk_idiv(yoe, m_autil.mk_int(4))),
+                m_autil.mk_idiv(yoe, m_autil.mk_int(100))),
+            doy), m);
+
+        // Absolute days → epoch days
+        expr_ref abs_days(m_autil.mk_add(m_autil.mk_mul(era, m_autil.mk_int(146097)), doe), m);
+        return expr_ref(m_autil.mk_sub(abs_days, m_autil.mk_int(730485)), m);
+    }
+
+    void solver::mk_epoch_to_ymd(expr* epoch, expr_ref& out_y, expr_ref& out_m, expr_ref& out_d) {
+        // Epoch days since 2000-03-01 → civil (y,m,d)
+        // Howard Hinnant's chrono-compatible algorithm
+
+        expr_ref three(m_autil.mk_int(3), m);
+
+        // 400-year cycles
+        expr_ref q400(m_autil.mk_idiv(epoch, m_autil.mk_int(146097)), m);
+        expr_ref r400(m_autil.mk_mod(epoch, m_autil.mk_int(146097)), m);
+
+        // 100-year blocks (clamp: max 3)
+        expr_ref q100_raw(m_autil.mk_idiv(r400, m_autil.mk_int(36524)), m);
+        expr_ref q100(m.mk_ite(
+            m.mk_not(m_autil.mk_le(q100_raw, three)), // >= 4
+            three, q100_raw), m);
+        expr_ref r100(m_autil.mk_sub(r400, m_autil.mk_mul(q100, m_autil.mk_int(36524))), m);
+
+        // 4-year blocks
+        expr_ref q4(m_autil.mk_idiv(r100, m_autil.mk_int(1461)), m);
+        expr_ref r4(m_autil.mk_mod(r100, m_autil.mk_int(1461)), m);
+
+        // 1-year blocks (clamp: max 3)
+        expr_ref q1_raw(m_autil.mk_idiv(r4, m_autil.mk_int(365)), m);
+        expr_ref q1(m.mk_ite(
+            m.mk_not(m_autil.mk_le(q1_raw, three)), // >= 4
+            three, q1_raw), m);
+        expr_ref r1(m_autil.mk_sub(r4, m_autil.mk_mul(q1, m_autil.mk_int(365))), m);
+
+        // March-based year
+        expr_ref y(m_autil.mk_add(m_autil.mk_int(2000),
+            m_autil.mk_add(m_autil.mk_mul(q400, m_autil.mk_int(400)),
+                m_autil.mk_add(m_autil.mk_mul(q100, m_autil.mk_int(100)),
+                    m_autil.mk_add(m_autil.mk_mul(q4, m_autil.mk_int(4)), q1)))), m);
+
+        // Month from day-of-year: mp = (5*r1 + 2) / 153
+        expr_ref mp(m_autil.mk_idiv(
+            m_autil.mk_add(m_autil.mk_mul(m_autil.mk_int(5), r1), m_autil.mk_int(2)),
+            m_autil.mk_int(153)), m);
+
+        // Day of month
+        out_d = expr_ref(m_autil.mk_add(
+            m_autil.mk_sub(r1,
+                m_autil.mk_idiv(
+                    m_autil.mk_add(m_autil.mk_mul(m_autil.mk_int(153), mp), m_autil.mk_int(2)),
+                    m_autil.mk_int(5))),
+            m_autil.mk_int(1)), m);
+
+        // Calendar month: mp+3, wrap Jan(13)/Feb(14) → 1/2
+        expr_ref m_raw(m_autil.mk_add(mp, m_autil.mk_int(3)), m);
+        out_m = expr_ref(m.mk_ite(
+            m.mk_not(m_autil.mk_le(m_raw, m_autil.mk_int(12))), // > 12
+            m_autil.mk_sub(m_raw, m_autil.mk_int(12)),
+            m_raw), m);
+
+        // Gregorian year: Jan/Feb belong to next year
+        out_y = expr_ref(m.mk_ite(
+            m_autil.mk_le(out_m, m_autil.mk_int(2)),
+            m_autil.mk_add(y, m_autil.mk_int(1)),
+            y), m);
+    }
+
+    void solver::assert_date_validity(expr* y, expr* mo, expr* d) {
+        // 1 <= month <= 12
+        expr_ref le1(m_autil.mk_le(m_autil.mk_int(1), mo), m);
+        expr_ref le2(m_autil.mk_le(mo, m_autil.mk_int(12)), m);
+        add_unit(mk_literal(le1));
+        add_unit(mk_literal(le2));
+        // 1 <= day <= days_in_month(year, month)
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), d)));
+        add_unit(mk_literal(m_autil.mk_le(d, mk_days_in_month(y, mo))));
+        // 1900 <= year <= 2100
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1900), y)));
+        add_unit(mk_literal(m_autil.mk_le(y, m_autil.mk_int(2100))));
+        // Boundary: y=1900 → m>=3, y=2100 → m<=2
+        sat::literal y_ne_1900 = mk_literal(m.mk_not(m.mk_eq(y, m_autil.mk_int(1900))));
+        sat::literal m_ge_3 = mk_literal(m_autil.mk_le(m_autil.mk_int(3), mo));
+        add_clause(y_ne_1900, m_ge_3);
+        sat::literal y_ne_2100 = mk_literal(m.mk_not(m.mk_eq(y, m_autil.mk_int(2100))));
+        sat::literal m_le_2 = mk_literal(m_autil.mk_le(mo, m_autil.mk_int(2)));
+        add_clause(y_ne_2100, m_le_2);
+    }
+
+    // -------------------------------------------------------
     // Axiom helpers
     // -------------------------------------------------------
 
@@ -121,9 +295,12 @@ namespace date {
         expr* y  = a->get_arg(0);
         expr* mo = a->get_arg(1);
         expr* d  = a->get_arg(2);
+        // Selector axioms
         assert_eq_axiom(mk_date_year(term),  y);
         assert_eq_axiom(mk_date_month(term), mo);
         assert_eq_axiom(mk_date_day(term),   d);
+        // Validity constraints
+        assert_date_validity(y, mo, d);
     }
 
     void solver::axiomatize_mk_period(expr* term) {
@@ -144,11 +321,40 @@ namespace date {
         app* a = to_app(term);
         expr* d = a->get_arg(0);
         expr* p = a->get_arg(1);
-        app_ref rhs = mk_mk_date(
-            m_autil.mk_add(mk_date_year(d),  mk_period_years(p)),
-            m_autil.mk_add(mk_date_month(d), mk_period_months(p)),
-            m_autil.mk_add(mk_date_day(d),   mk_period_days(p)));
-        assert_eq_axiom(term, rhs);
+
+        // Extract components
+        app_ref dy = mk_date_year(d);
+        app_ref dm = mk_date_month(d);
+        app_ref dd = mk_date_day(d);
+        app_ref py = mk_period_years(p);
+        app_ref pm = mk_period_months(p);
+        app_ref pd = mk_period_days(p);
+
+        // Step 1: Month normalization
+        // raw_m = month(d) + years(p)*12 + months(p)
+        expr_ref total_period_months(m_autil.mk_add(m_autil.mk_mul(py, m_autil.mk_int(12)), pm), m);
+        expr_ref raw_m(m_autil.mk_add(dm, total_period_months), m);
+        expr_ref ny(m), nm(m);
+        mk_normalize_month(dy, raw_m, ny, nm);
+
+        // Step 2: EOM clamp
+        expr_ref cd = mk_eom_clamp(ny, nm, dd);
+
+        // Step 3: Day addition via epoch conversion
+        expr_ref base_epoch = mk_ymd_to_epoch(ny, nm, cd);
+        expr_ref result_epoch(m_autil.mk_add(base_epoch, pd), m);
+
+        // Decode result epoch to (year, month, day)
+        expr_ref ry(m), rm(m), rd(m);
+        mk_epoch_to_ymd(result_epoch, ry, rm, rd);
+
+        // Assert result selectors
+        assert_eq_axiom(mk_date_year(term), ry);
+        assert_eq_axiom(mk_date_month(term), rm);
+        assert_eq_axiom(mk_date_day(term), rd);
+
+        // Validity on result
+        assert_date_validity(ry, rm, rd);
     }
 
     void solver::axiomatize_date_sub(expr* term) {
@@ -157,11 +363,43 @@ namespace date {
         app* a = to_app(term);
         expr* d = a->get_arg(0);
         expr* p = a->get_arg(1);
-        app_ref rhs = mk_mk_date(
-            m_autil.mk_sub(mk_date_year(d),  mk_period_years(p)),
-            m_autil.mk_sub(mk_date_month(d), mk_period_months(p)),
-            m_autil.mk_sub(mk_date_day(d),   mk_period_days(p)));
-        assert_eq_axiom(term, rhs);
+
+        // date.sub(d, p) = date.add(d, -p)
+        app_ref py = mk_period_years(p);
+        app_ref pm = mk_period_months(p);
+        app_ref pd = mk_period_days(p);
+
+        // Negate period components
+        expr_ref neg_py(m_autil.mk_uminus(py), m);
+        expr_ref neg_pm(m_autil.mk_uminus(pm), m);
+        expr_ref neg_pd(m_autil.mk_uminus(pd), m);
+
+        // Same logic as date.add with negated period
+        app_ref dy = mk_date_year(d);
+        app_ref dm = mk_date_month(d);
+        app_ref dd = mk_date_day(d);
+
+        // Month normalization
+        expr_ref total_period_months(m_autil.mk_add(m_autil.mk_mul(neg_py, m_autil.mk_int(12)), neg_pm), m);
+        expr_ref raw_m(m_autil.mk_add(dm, total_period_months), m);
+        expr_ref ny(m), nm(m);
+        mk_normalize_month(dy, raw_m, ny, nm);
+
+        // EOM clamp
+        expr_ref cd = mk_eom_clamp(ny, nm, dd);
+
+        // Day addition via epoch
+        expr_ref base_epoch = mk_ymd_to_epoch(ny, nm, cd);
+        expr_ref result_epoch(m_autil.mk_add(base_epoch, neg_pd), m);
+
+        expr_ref ry(m), rm(m), rd(m);
+        mk_epoch_to_ymd(result_epoch, ry, rm, rd);
+
+        assert_eq_axiom(mk_date_year(term), ry);
+        assert_eq_axiom(mk_date_month(term), rm);
+        assert_eq_axiom(mk_date_day(term), rd);
+
+        assert_date_validity(ry, rm, rd);
     }
 
     void solver::axiomatize_period_add(expr* term) {
@@ -210,7 +448,7 @@ namespace date {
         expr* d1 = a->get_arg(0);
         expr* d2 = a->get_arg(1);
 
-        // Get components — use constructor args directly when available
+        // Get components
         expr_ref y1(m), mo1(m), dy1(m), y2(m), mo2(m), dy2(m);
         if (m_plugin.is_mk_date(d1)) {
             y1 = to_app(d1)->get_arg(0); mo1 = to_app(d1)->get_arg(1); dy1 = to_app(d1)->get_arg(2);
@@ -223,18 +461,18 @@ namespace date {
             y2 = mk_date_year(d2); mo2 = mk_date_month(d2); dy2 = mk_date_day(d2);
         }
 
-        // Build lexicographic comparison using only OP_LE (not OP_LT/OP_GT).
-        // a < b  =  not(b <= a)
-        // cmp = ly \/ (ey /\ (lm \/ (em /\ ld)))
+        // Lexicographic comparison on (year, month, day) — correct for valid dates
+        // ly = (y1 < y2), ey = (y1 == y2), lm = (m1 < m2), em = (m1 == m2), ld/led
+        // cmp = ly || (ey && (lm || (em && ld)))
         expr_ref ly(m), lm(m), ld(m);
         expr_ref ey(m.mk_eq(y1, y2), m);
         expr_ref em(m.mk_eq(mo1, mo2), m);
 
         switch (k) {
         case OP_DATE_LT:
-            ly = m.mk_not(m_autil.mk_le(y2, y1));
-            lm = m.mk_not(m_autil.mk_le(mo2, mo1));
-            ld = m.mk_not(m_autil.mk_le(dy2, dy1));
+            ly = m.mk_not(m_autil.mk_le(y2, y1));   // y1 < y2
+            lm = m.mk_not(m_autil.mk_le(mo2, mo1)); // m1 < m2
+            ld = m.mk_not(m_autil.mk_le(dy2, dy1));  // d1 < d2
             break;
         case OP_DATE_LE:
             ly = m.mk_not(m_autil.mk_le(y2, y1));
@@ -262,8 +500,13 @@ namespace date {
     void solver::axiomatize_date_reconstruction(expr* e) {
         if (has_axiom(e)) return;
         mark_axiomatized(e);
-        app_ref rhs = mk_mk_date(mk_date_year(e), mk_date_month(e), mk_date_day(e));
+        app_ref y = mk_date_year(e);
+        app_ref mo = mk_date_month(e);
+        app_ref d = mk_date_day(e);
+        app_ref rhs = mk_mk_date(y, mo, d);
         assert_eq_axiom(e, rhs);
+        // Validity constraints on free date variables
+        assert_date_validity(y, mo, d);
     }
 
     void solver::axiomatize_period_reconstruction(expr* e) {
@@ -392,7 +635,6 @@ namespace date {
     // Model building
     // -------------------------------------------------------
 
-    // Walk the equivalence class of n to find a mk-date or mk-period constructor.
     euf::enode* solver::find_constructor(euf::enode* n) {
         sort* s = n->get_expr()->get_sort();
         bool want_date = m_plugin.is_date(s);
@@ -418,7 +660,6 @@ namespace date {
         if (!m_plugin.is_date(s) && !m_plugin.is_period(s))
             return;
 
-        // Find a constructor (mk-date / mk-period) in the equivalence class.
         euf::enode* con = find_constructor(n);
         if (con && con->num_args() == 3) {
             expr* y_val = values.get(con->get_arg(0)->get_root_id(), nullptr);
@@ -433,7 +674,6 @@ namespace date {
             }
         }
 
-        // Fallback to default value.
         if (m_plugin.is_date(s))
             values.setx(n->get_root_id(), m_plugin.mk_default_date(m));
         else
@@ -446,7 +686,6 @@ namespace date {
         if (!m_plugin.is_date(s) && !m_plugin.is_period(s))
             return false;
 
-        // Find a constructor in the equivalence class and depend on its args.
         euf::enode* con = find_constructor(n);
         if (con && con->num_args() == 3) {
             for (euf::enode* arg : euf::enode_args(con))
@@ -459,8 +698,6 @@ namespace date {
     }
 
     bool solver::include_func_interp(func_decl* f) const {
-        // Period selectors (p-years, p-months, p-days) are in our family.
-        // Include their interpretation so the model evaluator can handle them.
         if (f->get_family_id() == get_id()) {
             switch (f->get_decl_kind()) {
             case OP_PERIOD_YEARS:
