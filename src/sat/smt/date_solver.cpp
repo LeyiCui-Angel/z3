@@ -11,7 +11,7 @@ Abstract:
     Reduces date/period operations to integer arithmetic via eager axiom instantiation.
 
     Date semantics follow the DateSAT framework:
-    - Valid dates: year 1900-2100, month 1-12, day 1-dim(y,m)
+    - Valid dates: any year, month 1-12, day 1-dim(y,m)
     - date.add: month normalization + EOM clamp + epoch-based day carry
     - Comparisons: lexicographic on (year, month, day) for valid dates
 
@@ -370,21 +370,12 @@ namespace date {
     }
 
     void solver::assert_date_validity(expr* y, expr* mo, expr* d) {
-        // Symbolic validity constraints using the ITE-based days_in_month.
-        // When y and mo are selector terms with concrete values known to the
-        // arithmetic solver, it can evaluate the ITE and detect violations.
+        // Calendar validity: month in [1,12], day in [1, days_in_month(y,mo)].
+        // No year bounds — the theory accepts any integer year.
         add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), mo)));
         add_unit(mk_literal(m_autil.mk_le(mo, m_autil.mk_int(12))));
         add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), d)));
         add_unit(mk_literal(m_autil.mk_le(d, mk_days_in_month(y, mo))));
-        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1900), y)));
-        add_unit(mk_literal(m_autil.mk_le(y, m_autil.mk_int(2100))));
-        sat::literal y_ne_1900 = mk_literal(m.mk_not(m.mk_eq(y, m_autil.mk_int(1900))));
-        sat::literal m_ge_3 = mk_literal(m_autil.mk_le(m_autil.mk_int(3), mo));
-        add_clause(y_ne_1900, m_ge_3);
-        sat::literal y_ne_2100 = mk_literal(m.mk_not(m.mk_eq(y, m_autil.mk_int(2100))));
-        sat::literal m_le_2 = mk_literal(m_autil.mk_le(mo, m_autil.mk_int(2)));
-        add_clause(y_ne_2100, m_le_2);
     }
 
     // -------------------------------------------------------
@@ -418,20 +409,17 @@ namespace date {
         assert_eq_axiom(mk_date_year(term),  y);
         assert_eq_axiom(mk_date_month(term), mo);
         assert_eq_axiom(mk_date_day(term),   d);
-        // Validity using selectors — arithmetic solver can reason about
-        // day(term) ≤ dim when year(term) and month(term) are known
-        app_ref sy = mk_date_year(term);
-        app_ref sm = mk_date_month(term);
-        app_ref sd = mk_date_day(term);
-        // Direct simple bounds that arithmetic handles without ITE
-        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), sy)));
-        add_unit(mk_literal(m_autil.mk_le(sy, m_autil.mk_int(2100))));
-        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1900), sy)));
-        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), sm)));
-        add_unit(mk_literal(m_autil.mk_le(sm, m_autil.mk_int(12))));
-        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), sd)));
-        add_unit(mk_literal(m_autil.mk_le(sd, m_autil.mk_int(31))));  // coarse bound
-        assert_date_validity(sy, sm, sd);
+        // Validate directly against the raw constructor arguments.
+        // When y/mo/d are concrete literals (the common case), the arithmetic
+        // solver evaluates e.g. "13 ≤ 12" immediately without waiting for the
+        // EUF→arithmetic equality propagation chain that would be needed if we
+        // constrained the selector terms (date.month(term)) instead.
+        // Coarse bound first for cheap early cutting, then exact days_in_month.
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), mo)));
+        add_unit(mk_literal(m_autil.mk_le(mo, m_autil.mk_int(12))));
+        add_unit(mk_literal(m_autil.mk_le(m_autil.mk_int(1), d)));
+        add_unit(mk_literal(m_autil.mk_le(d, m_autil.mk_int(31))));
+        assert_date_validity(y, mo, d);
     }
 
     void solver::axiomatize_mk_period(expr* term) {
@@ -740,8 +728,30 @@ namespace date {
     }
 
     void solver::apply_sort_cnstr(euf::enode* n, sort* s) {
-        if (m_plugin.is_date(s) || m_plugin.is_period(s))
-            mk_var(n);
+        if (!m_plugin.is_date(s) && !m_plugin.is_period(s))
+            return;
+        mk_var(n);
+        // Eagerly axiomatize constructor terms the moment their enode is created,
+        // even when they appear only as subterms of a plain EUF equality
+        // (e.g. (= d (date.mk 2000 13 1))).  In that case visit_rec / post_visit
+        // is never called by the SAT solver, so without this hook the validity
+        // constraints would be deferred to check() — too late for the arithmetic
+        // theory to propagate the conflict before the solver reports sat.
+        expr* e = n->get_expr();
+        if (!is_app(e)) return;
+        decl_kind k = to_app(e)->get_decl()->get_decl_kind();
+        if (k == OP_DATE_MK)
+            axiomatize_mk_date(e);
+        else if (k == OP_DATE_ADD)
+            axiomatize_date_add(e);
+        else if (k == OP_DATE_SUB)
+            axiomatize_date_sub(e);
+        else if (k == OP_PERIOD_ADD)
+            axiomatize_period_add(e);
+        else if (k == OP_PERIOD_SUB)
+            axiomatize_period_sub(e);
+        else if (k == OP_PERIOD_MUL)
+            axiomatize_period_mul(e);
     }
 
     // -------------------------------------------------------
@@ -757,7 +767,15 @@ namespace date {
             expr* ex = e->get_expr();
             sort* s = ex->get_sort();
             if (m_plugin.is_date(s) && !has_axiom(ex)) {
-                axiomatize_date_reconstruction(ex);
+                // For date.mk constructors, axiomatize_mk_date validates
+                // directly against the raw integer arguments so the arithmetic
+                // solver can catch e.g. month=13 without waiting for EUF
+                // equality propagation (which never fires when the constructor
+                // appears only inside a plain EUF equality like (= d (date.mk ...))).
+                if (is_app(ex) && to_app(ex)->get_decl()->get_decl_kind() == OP_DATE_MK)
+                    axiomatize_mk_date(ex);
+                else
+                    axiomatize_date_reconstruction(ex);
                 added = true;
             }
             if (m_plugin.is_period(s) && !has_axiom(ex)) {
