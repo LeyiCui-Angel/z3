@@ -69,7 +69,8 @@ z3_add_component(smt
     theory_recfun.cpp
     theory_seq.cpp
     theory_sls.cpp
-    theory_special_relations.cpp    
+    theory_special_relations.cpp
+    theory_date.cpp
     theory_user_propagator.cpp
     theory_utvpi.cpp
     theory_wmaxsat.cpp

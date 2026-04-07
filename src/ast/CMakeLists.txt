@@ -48,6 +48,7 @@ z3_add_component(ast
     seq_decl_plugin.cpp
     shared_occs.cpp
     special_relations_decl_plugin.cpp
+    date_decl_plugin.cpp
     static_features.cpp
     used_vars.cpp
     value_generator.cpp
