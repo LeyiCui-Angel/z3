@@ -33,6 +33,7 @@ Notes:
 #include "ast/fpa_decl_plugin.h"
 #include "ast/special_relations_decl_plugin.h"
 #include "ast/finite_set_decl_plugin.h"
+#include "ast/date_decl_plugin.h"
 #include "ast/ast_pp.h"
 #include "ast/pp.h"
 #include "ast/ast_smt2_pp.h"
@@ -834,6 +835,7 @@ void cmd_context::init_manager_core(bool new_manager) {
         register_plugin(symbol("datalog_relation"), alloc(datalog::dl_decl_plugin), !has_logic());
         register_plugin(symbol("specrels"), alloc(special_relations_decl_plugin), !has_logic());
         register_plugin(symbol("finite_set"), alloc(finite_set_decl_plugin), !has_logic() || smt_logics::logic_has_finite_sets(m_logic));
+        register_plugin(symbol("date"), alloc(date_decl_plugin), true);
     }
     else {
         // the manager was created by an external module

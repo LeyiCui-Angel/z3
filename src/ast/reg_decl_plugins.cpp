@@ -30,6 +30,7 @@ Revision History:
 #include "ast/fpa_decl_plugin.h"
 #include "ast/special_relations_decl_plugin.h"
 #include "ast/finite_set_decl_plugin.h"
+#include "ast/date_decl_plugin.h"
 
 void reg_decl_plugins(ast_manager & m) {
     if (!m.get_plugin(m.mk_family_id(symbol("arith")))) {
@@ -67,5 +68,8 @@ void reg_decl_plugins(ast_manager & m) {
     }
     if (!m.get_plugin(m.mk_family_id(symbol("finite_set")))) {
         m.register_plugin(symbol("finite_set"), alloc(finite_set_decl_plugin));
+    }
+    if (!m.get_plugin(m.mk_family_id(symbol("date")))) {
+        m.register_plugin(symbol("date"), alloc(date_decl_plugin));
     }
 }
