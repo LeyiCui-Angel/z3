@@ -38,7 +38,6 @@ namespace date {
 
         // Track which Date terms have had axioms injected
         obj_hashtable<expr> m_processed;
-
         // ---- axiom injection ----
         void inject_date_axioms(expr* e);
         void inject_mk_axioms(app* mk_term);
@@ -49,7 +48,6 @@ namespace date {
         // ---- expression builders ----
         expr_ref mk_is_leap(expr* y);
         expr_ref mk_days_in_month(expr* y, expr* mo);
-        expr_ref mk_lex_lt(expr* d1, expr* d2);
 
         // ---- concrete date arithmetic ----
         static int64_t floor_div(int64_t a, int64_t b);

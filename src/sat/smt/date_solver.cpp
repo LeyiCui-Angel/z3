@@ -197,21 +197,6 @@ expr_ref solver::mk_days_in_month(expr* y, expr* mo) {
                 m.mk_ite(is_feb, feb_days, m_autil.mk_int(28)))), m);
 }
 
-expr_ref solver::mk_lex_lt(expr* d1, expr* d2) {
-    expr* y1  = m_util.mk_year(d1);
-    expr* m1  = m_util.mk_month(d1);
-    expr* da1 = m_util.mk_day(d1);
-    expr* y2  = m_util.mk_year(d2);
-    expr* m2  = m_util.mk_month(d2);
-    expr* da2 = m_util.mk_day(d2);
-    // Note: use not(b <= a) for a < b to avoid OP_LT in old core
-    // In new core we can use mk_lt directly, but keep consistent
-    expr* year_lt  = m.mk_not(m_autil.mk_le(y2, y1));
-    expr* month_lt = m.mk_and(m.mk_eq(y1, y2), m.mk_not(m_autil.mk_le(m2, m1)));
-    expr* day_lt   = m.mk_and(m.mk_eq(y1, y2),
-                        m.mk_and(m.mk_eq(m1, m2), m.mk_not(m_autil.mk_le(da2, da1))));
-    return expr_ref(m.mk_or(year_lt, m.mk_or(month_lt, day_lt)), m);
-}
 
 // ============================================================
 // Axiom injection helpers
@@ -252,6 +237,7 @@ void solver::inject_date_axioms(expr* e) {
     // Reconstruction: e = date.mk(year(e), month(e), day(e))
     expr* mk_e = m_util.mk_date(yr, mo, da);
     assert_eq(e, mk_e);
+
 }
 
 void solver::inject_mk_axioms(app* mk_term) {
@@ -261,6 +247,17 @@ void solver::inject_mk_axioms(app* mk_term) {
     assert_eq(m_util.mk_year(mk_term), y);
     assert_eq(m_util.mk_month(mk_term), mo);
     assert_eq(m_util.mk_day(mk_term), da);
+
+    // Enforce component validity so that date.mk(y, m, d) only produces
+    // calendar-valid dates.  inject_date_axioms skips explicit constructors
+    // to avoid recursion, so we add the same constraints here directly.
+    // 1 ≤ month ≤ 12
+    assert_formula(m_autil.mk_ge(mo, m_autil.mk_int(1)));
+    assert_formula(m_autil.mk_le(mo, m_autil.mk_int(12)));
+    // 1 ≤ day ≤ days_in_month(year, month)
+    assert_formula(m_autil.mk_ge(da, m_autil.mk_int(1)));
+    expr_ref dim = mk_days_in_month(y, mo);
+    assert_formula(m_autil.mk_le(da, dim.get()));
 }
 
 void solver::inject_cmp_axioms(app* atom) {
@@ -268,20 +265,69 @@ void solver::inject_cmp_axioms(app* atom) {
     expr* d1 = atom->get_arg(0);
     expr* d2 = atom->get_arg(1);
 
-    expr_ref lex_lt  = mk_lex_lt(d1, d2);
-    expr_ref lex_lt2 = mk_lex_lt(d2, d1);
-    expr* eq12 = m.mk_eq(d1, d2);
+    // Normalise: ge(d1,d2) = le(d2,d1), gt(d1,d2) = lt(d2,d1)
+    bool is_ge_gt = (k == OP_DATE_GE || k == OP_DATE_GT);
+    bool strict   = (k == OP_DATE_LT || k == OP_DATE_GT);
+    expr* lo = is_ge_gt ? d2 : d1;
+    expr* hi = is_ge_gt ? d1 : d2;
 
-    expr* rhs = nullptr;
-    switch (k) {
-    case OP_DATE_LT: rhs = lex_lt.get(); break;
-    case OP_DATE_LE: rhs = m.mk_or(lex_lt.get(), eq12); break;
-    case OP_DATE_GT: rhs = lex_lt2.get(); break;
-    case OP_DATE_GE: rhs = m.mk_or(lex_lt2.get(), eq12); break;
-    default: return;
-    }
+    // For concrete date.mk(y,m,d) terms, use raw integer literals directly so that
+    // the arithmetic solver sees e.g. "year(D8) < 2100" immediately without waiting
+    // for EUF propagation of date.year(date.mk(2100,2,28)) = 2100.
+    auto get_comp = [&](expr* d, expr*& y_out, expr*& m_out, expr*& da_out) {
+        if (m_util.is_date_mk(d)) {
+            app* mk = to_app(d);
+            rational yr_r, mo_r, da_r;
+            if (m_autil.is_numeral(mk->get_arg(0), yr_r) && yr_r.is_int() &&
+                m_autil.is_numeral(mk->get_arg(1), mo_r) && mo_r.is_int() &&
+                m_autil.is_numeral(mk->get_arg(2), da_r) && da_r.is_int()) {
+                y_out  = m_autil.mk_numeral(yr_r, true);
+                m_out  = m_autil.mk_numeral(mo_r, true);
+                da_out = m_autil.mk_numeral(da_r, true);
+                return;
+            }
+        }
+        y_out  = m_util.mk_year(d);
+        m_out  = m_util.mk_month(d);
+        da_out = m_util.mk_day(d);
+    };
 
-    assert_formula(m.mk_iff(atom, rhs));
+    expr *y_lo, *m_lo, *d_lo, *y_hi, *m_hi, *d_hi;
+    get_comp(lo, y_lo, m_lo, d_lo);
+    get_comp(hi, y_hi, m_hi, d_hi);
+
+    // Primitive SAT literals for arithmetic/EUF comparisons.
+    // Use ¬(b ≤ a) to express a < b (avoids OP_LT atoms in arith).
+    literal yr_lt  = mk_literal(m.mk_not(m_autil.mk_le(y_hi, y_lo))); // year(lo) < year(hi)
+    literal yr_eq  = mk_literal(m.mk_eq(y_lo, y_hi));
+    literal mo_lt  = mk_literal(m.mk_not(m_autil.mk_le(m_hi, m_lo))); // month(lo) < month(hi)
+    literal mo_eq  = mk_literal(m.mk_eq(m_lo, m_hi));
+    // For le: day(lo) ≤ day(hi); for lt: day(lo) < day(hi) i.e. ¬(d_hi ≤ d_lo)
+    literal da_cmp = strict
+        ? mk_literal(m.mk_not(m_autil.mk_le(d_hi, d_lo)))
+        : mk_literal(m_autil.mk_le(d_lo, d_hi));
+
+    literal A = mk_literal(atom);
+
+    // Forward clauses: A (date comparison true) → lex comparison holds.
+    // These are the critical clauses that enforce bounds on date variables.
+    //
+    // F1: A → year(lo) ≤ year(hi)            i.e. {¬A, yr_lt, yr_eq}
+    add_clause(~A, yr_lt, yr_eq);
+    // F2: A ∧ yr_eq → month(lo) ≤ month(hi)  i.e. {¬A, ¬yr_eq, mo_lt, mo_eq}
+    add_clause(~A, ~yr_eq, mo_lt, mo_eq);
+    // F3: A ∧ yr_eq ∧ mo_eq → day cmp        i.e. {¬A, ¬yr_eq, ¬mo_eq, da_cmp}
+    add_clause(~A, ~yr_eq, ~mo_eq, da_cmp);
+
+    // Backward clauses: lex comparison holds → A (date comparison true).
+    // These ensure the atom is set correctly for use in disjunctions.
+    //
+    // B1: yr_lt → A                           i.e. {A, ¬yr_lt}
+    add_clause(A, ~yr_lt);
+    // B2: yr_eq ∧ mo_lt → A                  i.e. {A, ¬yr_eq, ¬mo_lt}
+    add_clause(A, ~yr_eq, ~mo_lt);
+    // B3: yr_eq ∧ mo_eq ∧ da_cmp → A        i.e. {A, ¬yr_eq, ¬mo_eq, ¬da_cmp}
+    add_clause(A, ~yr_eq, ~mo_eq, ~da_cmp);
 }
 
 void solver::inject_add_axioms(app* add_term) {
@@ -297,16 +343,17 @@ void solver::inject_add_axioms(app* add_term) {
 
     bool base_is_concrete_mk = false;
     int64_t base_y = 0, base_m = 0, base_d = 0;
-    if (m_util.is_date_mk(base) && py_concrete && pm_concrete && pd_concrete) {
+
+    if (py_concrete && pm_concrete && pd_concrete && m_util.is_date_mk(base)) {
         app* mk = to_app(base);
         rational y_r, m_r, d_r;
         if (m_autil.is_numeral(mk->get_arg(0), y_r) && y_r.is_int() &&
             m_autil.is_numeral(mk->get_arg(1), m_r) && m_r.is_int() &&
             m_autil.is_numeral(mk->get_arg(2), d_r) && d_r.is_int()) {
             base_is_concrete_mk = true;
-            base_y = (int64_t)y_r.get_int64();
-            base_m = (int64_t)m_r.get_int64();
-            base_d = (int64_t)d_r.get_int64();
+            base_y = y_r.get_int64();
+            base_m = m_r.get_int64();
+            base_d = d_r.get_int64();
         }
     }
 
@@ -325,47 +372,97 @@ void solver::inject_add_axioms(app* add_term) {
         int64_t ipy = (int64_t)py_r.get_int64();
         int64_t ipm = (int64_t)pm_r.get_int64();
         int64_t ipd = (int64_t)pd_r.get_int64();
+        int64_t month_offset = 12 * ipy + ipm;
 
-        if (ipy == 0 && ipm == 0 && ipd == 0) {
-            // Direct equality: date.add(d, 0, 0, 0) = d
+        if (month_offset == 0 && ipd == 0) {
+            // date.add(d, 0, 0, 0) = d
             assert_eq(add_term, base);
             return;
         }
 
-        if (ipy == 0 && ipm == 0) {
-            if (ipd > 0)
-                assert_formula(m_util.mk_lt(base, add_term));
-            else if (ipd < 0)
-                assert_formula(m_util.mk_lt(add_term, base));
-            else {
-                assert_eq(add_term, base);
-            }
-            return;
-        }
-
-        // General case with non-zero py or pm
         expr* yd = m_util.mk_year(base);
         expr* md = m_util.mk_month(base);
         expr* dd = m_util.mk_day(base);
 
-        int64_t month_offset = 12 * ipy + ipm;
-        expr* raw_m_expr = m_autil.mk_add(md, m_autil.mk_int((int)month_offset));
-        expr* t_expr = m_autil.mk_sub(raw_m_expr, m_autil.mk_int(1));
-        expr* y1 = m_autil.mk_add(yd, m_autil.mk_idiv(t_expr, m_autil.mk_int(12)));
-        expr* m1 = m_autil.mk_add(m_autil.mk_mod(t_expr, m_autil.mk_int(12)), m_autil.mk_int(1));
-
-        expr_ref dim1 = mk_days_in_month(y1, m1);
-        expr* clamp = m.mk_ite(m_autil.mk_le(dd, dim1.get()), dd, dim1.get());
+        // --- Step 1: compute (y0, m0) after month adjustment and raw day ---
+        // For pure-day addition (month_offset==0): no clamping needed.
+        // For month adjustment: clamp day to days-in-month of the adjusted month.
+        expr* y0;
+        expr* m0;
+        expr* raw0;
+        if (month_offset == 0) {
+            y0   = yd;
+            m0   = md;
+            raw0 = (ipd != 0) ? m_autil.mk_add(dd, m_autil.mk_int((int)ipd)) : dd;
+        } else {
+            expr* raw_m = m_autil.mk_add(md, m_autil.mk_int((int)month_offset));
+            expr* t     = m_autil.mk_sub(raw_m, m_autil.mk_int(1));
+            y0 = m_autil.mk_add(yd, m_autil.mk_idiv(t, m_autil.mk_int(12)));
+            m0 = m_autil.mk_add(m_autil.mk_mod(t, m_autil.mk_int(12)), m_autil.mk_int(1));
+            expr_ref dim_adj = mk_days_in_month(y0, m0);
+            expr* clamp = m.mk_ite(m_autil.mk_le(dd, dim_adj.get()), dd, dim_adj.get());
+            raw0 = (ipd != 0) ? m_autil.mk_add(clamp, m_autil.mk_int((int)ipd)) : clamp;
+        }
 
         if (ipd == 0) {
-            assert_eq(m_util.mk_year(add_term), y1);
-            assert_eq(m_util.mk_month(add_term), m1);
-            assert_eq(m_util.mk_day(add_term), clamp);
-        } else if (ipd > 0) {
-            assert_formula(m_util.mk_lt(base, add_term));
-        } else {
-            assert_formula(m_util.mk_lt(add_term, base));
+            // Exact: month-only adjustment, no day overflow.
+            // Assert add_term = date.mk(y0, m0, raw0) rather than three separate
+            // selector equalities.  This lets EUF congruence-close across different
+            // add/sub terms that happen to land on the same date.
+            assert_eq(add_term, m_util.mk_date(y0, m0, raw0));
+            return;
         }
+
+        // --- Step 2: normalize raw0 into a valid date via bounded ITE carry loops ---
+        // For a concrete ipd, at most ceil(|ipd|/28)+4 month-carry steps are needed.
+        // Cap at 50 to handle offsets up to ~1400 days while keeping formula size manageable.
+        int n_steps = (int)(std::abs(ipd) / 28) + 4;
+        if (n_steps > 50) n_steps = 50;
+
+        expr_ref ry(y0, m), rm(m0, m), rd(raw0, m);
+
+        if (ipd > 0) {
+            for (int i = 0; i < n_steps; i++) {
+                expr_ref dim_i = mk_days_in_month(ry.get(), rm.get());
+                // over := rd > dim_i  i.e.  NOT (rd <= dim_i)
+                expr* over    = m.mk_not(m_autil.mk_le(rd.get(), dim_i.get()));
+                expr* is_dec  = m.mk_eq(rm.get(), m_autil.mk_int(12));
+                expr* rm_nxt  = m.mk_ite(is_dec, m_autil.mk_int(1),
+                                         m_autil.mk_add(rm.get(), m_autil.mk_int(1)));
+                expr* ry_nxt  = m.mk_ite(is_dec,
+                                         m_autil.mk_add(ry.get(), m_autil.mk_int(1)),
+                                         ry.get());
+                rd = m.mk_ite(over, m_autil.mk_sub(rd.get(), dim_i.get()), rd.get());
+                ry = m.mk_ite(over, ry_nxt, ry.get());
+                rm = m.mk_ite(over, rm_nxt, rm.get());
+            }
+        } else { // ipd < 0
+            for (int i = 0; i < n_steps; i++) {
+                // under := rd < 1  i.e.  NOT (rd >= 1)
+                expr* under   = m.mk_not(m_autil.mk_ge(rd.get(), m_autil.mk_int(1)));
+                expr* is_jan  = m.mk_eq(rm.get(), m_autil.mk_int(1));
+                expr* rm_prv  = m.mk_ite(is_jan, m_autil.mk_int(12),
+                                         m_autil.mk_sub(rm.get(), m_autil.mk_int(1)));
+                expr* ry_prv  = m.mk_ite(is_jan,
+                                         m_autil.mk_sub(ry.get(), m_autil.mk_int(1)),
+                                         ry.get());
+                // Tentatively update (ry, rm) to the previous month, then add its length.
+                expr_ref ry_t(m.mk_ite(under, ry_prv, ry.get()), m);
+                expr_ref rm_t(m.mk_ite(under, rm_prv, rm.get()), m);
+                expr_ref dim_prv = mk_days_in_month(ry_t.get(), rm_t.get());
+                rd = m.mk_ite(under,
+                              m_autil.mk_add(rd.get(), dim_prv.get()),
+                              rd.get());
+                ry = ry_t;
+                rm = rm_t;
+            }
+        }
+
+        // Assert add_term = date.mk(ry, rm, rd) rather than three separate selector
+        // equalities.  The constructor equality lets EUF congruence-close across
+        // different add/sub terms that land on the same date (e.g. "+1 month" and
+        // "+28 days" from Feb 28 both resolve to Mar 28 → they must be equal).
+        assert_eq(add_term, m_util.mk_date(ry.get(), rm.get(), rd.get()));
     }
 }
 
@@ -398,7 +495,47 @@ void solver::add_value(euf::enode* n, model& mdl, expr_ref_vector& values) {
     if (!m_util.is_date(e->get_sort()))
         return;
 
-    // Find the year, month, day values from the model
+    // Case 1: date.add(base, py, pm, pd) or date.sub(base, py, pm, pd)
+    // Compute the result concretely from the base's already-computed model value.
+    if (is_app(e) && (m_util.is_date_add(e) || m_util.is_date_sub(e))) {
+        app*  a      = to_app(e);
+        bool  is_sub = m_util.is_date_sub(e);
+        expr* base   = a->get_arg(0);
+        expr* py_e   = a->get_arg(1);
+        expr* pm_e   = a->get_arg(2);
+        expr* pd_e   = a->get_arg(3);
+
+        euf::enode* base_node = expr2enode(base);
+        expr* base_val = base_node ? values.get(base_node->get_root()->get_id()) : nullptr;
+
+        rational py_r, pm_r, pd_r;
+        bool py_ok = m_autil.is_numeral(py_e, py_r) && py_r.is_int();
+        bool pm_ok = m_autil.is_numeral(pm_e, pm_r) && pm_r.is_int();
+        bool pd_ok = m_autil.is_numeral(pd_e, pd_r) && pd_r.is_int();
+
+        if (base_val && m_util.is_date_mk(base_val) && py_ok && pm_ok && pd_ok) {
+            app* base_mk = to_app(base_val);
+            rational by_r, bm_r, bd_r;
+            if (m_autil.is_numeral(base_mk->get_arg(0), by_r) && by_r.is_int() &&
+                m_autil.is_numeral(base_mk->get_arg(1), bm_r) && bm_r.is_int() &&
+                m_autil.is_numeral(base_mk->get_arg(2), bd_r) && bd_r.is_int()) {
+
+                int64_t ipy = py_r.get_int64(), ipm = pm_r.get_int64(), ipd = pd_r.get_int64();
+                if (is_sub) { ipy = -ipy; ipm = -ipm; ipd = -ipd; }
+                int64_t ry, rm, rd;
+                compute_date_add(by_r.get_int64(), bm_r.get_int64(), bd_r.get_int64(),
+                                 ipy, ipm, ipd, ry, rm, rd);
+                values.set(n->get_id(), m_util.mk_date(
+                    m_autil.mk_int((int)ry),
+                    m_autil.mk_int((int)rm),
+                    m_autil.mk_int((int)rd)));
+                return;
+            }
+        }
+        // Fall through to selector-based approach if concrete eval isn't possible.
+    }
+
+    // Case 2: selector-based (for free Date variables and fallback).
     expr_ref yr_val(m), mo_val(m), da_val(m);
 
     app* yr_expr = m_util.mk_year(e);
@@ -425,7 +562,14 @@ bool solver::add_dep(euf::enode* n, top_sort<euf::enode>& dep) {
     if (!m_util.is_date(e->get_sort()))
         return false;
 
-    // Date values depend on their year/month/day enodes
+    // date.add/date.sub must be valued after their base date.
+    if (is_app(e) && (m_util.is_date_add(e) || m_util.is_date_sub(e))) {
+        euf::enode* base_node = expr2enode(to_app(e)->get_arg(0));
+        if (base_node)
+            dep.add(n, base_node->get_root());
+    }
+
+    // Date values also depend on their year/month/day selector enodes.
     app* yr_expr = m_util.mk_year(e);
     app* mo_expr = m_util.mk_month(e);
     app* da_expr = m_util.mk_day(e);
