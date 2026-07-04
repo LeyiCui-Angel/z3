@@ -74,6 +74,7 @@ namespace smt {
         assert_axiom(a.mk_le(mo, a.mk_int(12)));
         assert_axiom(a.mk_le(a.mk_int(1), d));
         assert_axiom(a.mk_le(d, u.mk_days_in_month_expr(y, mo)));
+        assert_axiom(m.mk_eq(u.mk_rata(x), u.mk_rata_die_expr(y, mo, d)));
         if (!u.is_mk(x))
             assert_axiom(m.mk_eq(x, u.mk_mk(y, mo, d)));
     }
@@ -119,12 +120,17 @@ namespace smt {
     }
 
     /**
-       For t = (date.add x py pm pd) assert
-           rata_die(t) = add_rata_die(x, py, pm, pd)
-       where rata_die is the day-number bijection between calendar-valid
-       dates and integers, and add_rata_die performs month normalization
-       and the end-of-month clamp followed by day addition. Together with
-       the validity axioms for t this pins down exactly one date.
+       For t = (date.add x py pm pd), let (oy, om, od) be the month
+       normalization and end-of-month clamp of x by (py, pm) (steps 1 and 2
+       of the date.add algorithm). The triple (oy, om, od) is calendar-valid
+       by construction, and it is materialized as the internal constructor
+       term mkc = (date.mk oy om od) with unconditional selector equations.
+       Step 3 (day carry) becomes the day-number equation
+
+           date.rata(t) = date.rata(mkc) + pd
+
+       which, together with the per-term day-number definitions and the
+       validity axioms of t, pins down exactly one result date.
        date.sub is handled as date.add with negated period arguments.
     */
     void theory_date::add_arith_axioms(app* t) {
@@ -136,15 +142,22 @@ namespace smt {
             pm = a.mk_uminus(pm);
             pd = a.mk_uminus(pd);
         }
-        enode* nx = ctx.get_enode(x);
-        ensure_date_axioms(nx);
-        enode* nt = ctx.get_enode(t);
-        ensure_date_axioms(nt);
-        theory_var vx = nx->get_th_var(get_id());
-        theory_var vt = nt->get_th_var(get_id());
-        expr_ref lhs(u.mk_rata_die_expr(year_of(vt), month_of(vt), day_of(vt)), m);
-        expr_ref rhs(u.mk_add_rata_die_expr(year_of(vx), month_of(vx), day_of(vx), py, pm, pd), m);
-        assert_axiom(m.mk_eq(lhs, rhs));
+        ensure_date_axioms(ctx.get_enode(x));
+        ensure_date_axioms(ctx.get_enode(t));
+        expr_ref oy(m), om(m), od(m);
+        u.mk_add_normalize_exprs(u.mk_year(x), u.mk_month(x), u.mk_day(x), py, pm, oy, om, od);
+        m_rw(oy);
+        m_rw(om);
+        m_rw(od);
+        app_ref mkc(u.mk_mk(oy, om, od), m);
+        assert_axiom(m.mk_eq(u.mk_year(mkc), oy));
+        assert_axiom(m.mk_eq(u.mk_month(mkc), om));
+        assert_axiom(m.mk_eq(u.mk_day(mkc), od));
+        rational vd;
+        if (a.is_numeral(pd, vd) && vd.is_zero())
+            // a zero day carry makes the result the clamped date itself
+            assert_axiom(m.mk_eq(t, mkc));
+        assert_axiom(m.mk_eq(u.mk_rata(t), a.mk_add(u.mk_rata(mkc), pd)));
     }
 
     /**
@@ -153,14 +166,10 @@ namespace smt {
        lexicographic order on (year, month, day).
     */
     void theory_date::add_cmp_axioms(literal lit, app* atom) {
-        enode* n1 = ctx.get_enode(atom->get_arg(0));
-        enode* n2 = ctx.get_enode(atom->get_arg(1));
-        ensure_date_axioms(n1);
-        ensure_date_axioms(n2);
-        theory_var v1 = n1->get_th_var(get_id());
-        theory_var v2 = n2->get_th_var(get_id());
-        expr_ref r1(u.mk_rata_die_expr(year_of(v1), month_of(v1), day_of(v1)), m);
-        expr_ref r2(u.mk_rata_die_expr(year_of(v2), month_of(v2), day_of(v2)), m);
+        ensure_date_axioms(ctx.get_enode(atom->get_arg(0)));
+        ensure_date_axioms(ctx.get_enode(atom->get_arg(1)));
+        expr_ref r1(u.mk_rata(atom->get_arg(0)), m);
+        expr_ref r2(u.mk_rata(atom->get_arg(1)), m);
         arith_util& a = u.arith();
         expr_ref cmp(m);
         switch (atom->get_decl_kind()) {
@@ -208,6 +217,7 @@ namespace smt {
         case OP_DATE_YEAR:
         case OP_DATE_MONTH:
         case OP_DATE_DAY:
+        case OP_DATE_RATA:
             ensure_date_axioms(ctx.get_enode(term->get_arg(0)));
             break;
         default:

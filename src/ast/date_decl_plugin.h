@@ -51,6 +51,10 @@ enum date_op_kind {
     OP_DATE_LE,
     OP_DATE_GT,
     OP_DATE_GE,
+    // internal: day number (rata die) of a date; not exposed to the SMT-LIB
+    // front-end. Used by the theory solvers to reduce date constraints to
+    // integer arithmetic.
+    OP_DATE_RATA,
     LAST_DATE_OP
 };
 
@@ -118,6 +122,7 @@ public:
     app* mk_day(expr* d)   { return m.mk_app(m_fid, OP_DATE_DAY, d); }
     app* mk_lt(expr* a, expr* b) { return m.mk_app(m_fid, OP_DATE_LT, a, b); }
     app* mk_le(expr* a, expr* b) { return m.mk_app(m_fid, OP_DATE_LE, a, b); }
+    app* mk_rata(expr* d) { return m.mk_app(m_fid, OP_DATE_RATA, d); }
 
     bool is_mk(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_MK); }
     bool is_year(expr const* e)  const { return is_app_of(e, m_fid, OP_DATE_YEAR); }
@@ -129,6 +134,7 @@ public:
     bool is_le(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_LE); }
     bool is_gt(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_GT); }
     bool is_ge(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_GE); }
+    bool is_rata(expr const* e)  const { return is_app_of(e, m_fid, OP_DATE_RATA); }
 
     // e is (date.mk y m d) with numeral arguments; the triple need not be valid.
     bool is_numeral_mk(expr const* e, rational& y, rational& mo, rational& d) const;
@@ -165,6 +171,8 @@ public:
     expr_ref mk_days_in_month_expr(expr* y, expr* mo);
     expr_ref mk_valid_expr(expr* y, expr* mo, expr* d);
     expr_ref mk_rata_die_expr(expr* y, expr* mo, expr* d);
-    // rata_die of date.add((y,mo,d), py, pm, pd)
-    expr_ref mk_add_rata_die_expr(expr* y, expr* mo, expr* d, expr* py, expr* pm, expr* pd);
+    // steps 1 and 2 of the date.add algorithm: month normalization of
+    // (y, mo) by (py, pm) followed by the end-of-month clamp of d
+    void mk_add_normalize_exprs(expr* y, expr* mo, expr* d, expr* py, expr* pm,
+                                expr_ref& out_y, expr_ref& out_m, expr_ref& out_d);
 };

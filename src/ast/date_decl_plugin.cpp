@@ -58,7 +58,10 @@ func_decl* date_decl_plugin::mk_date_op(decl_kind k, unsigned arity, sort* const
     case OP_DATE_YEAR:
     case OP_DATE_MONTH:
     case OP_DATE_DAY:
-        name = k == OP_DATE_YEAR ? "date.year" : (k == OP_DATE_MONTH ? "date.month" : "date.day");
+    case OP_DATE_RATA:
+        name = k == OP_DATE_YEAR ? "date.year" :
+               (k == OP_DATE_MONTH ? "date.month" :
+               (k == OP_DATE_DAY ? "date.day" : "date.rata"));
         expected_arity = 1;
         expected_domain[0] = m_date;
         range = m_int;
@@ -284,16 +287,27 @@ expr_ref date_util::mk_rata_die_expr(expr* y, expr* mo, expr* d) {
     return expr_ref(a.mk_add(a.mk_mul(era, a.mk_int(146097)), doe, a.mk_int(-719468)), m);
 }
 
-expr_ref date_util::mk_add_rata_die_expr(expr* y, expr* mo, expr* d, expr* py, expr* pm, expr* pd) {
+void date_util::mk_add_normalize_exprs(expr* y, expr* mo, expr* d, expr* py, expr* pm,
+                                       expr_ref& out_y, expr_ref& out_m, expr_ref& out_d) {
     arith_util& a = m_arith;
+    // The caller guarantees that (y, mo, d) are the selectors of a Date
+    // term, i.e. that they satisfy the calendar validity axioms. Under
+    // that assumption a concrete zero month shift makes steps 1 and 2 the
+    // identity: 1 <= mo <= 12 normalizes to (y, mo) and d <= days_in_month
+    // makes the clamp a no-op.
+    rational vy, vm;
+    if (a.is_numeral(py, vy) && a.is_numeral(pm, vm) && (rational(12) * vy + vm).is_zero()) {
+        out_y = y;
+        out_m = mo;
+        out_d = d;
+        return;
+    }
     // step 1 -- month normalization: t = mo + 12*py + pm - 1
     expr* t_args[4] = { mo, a.mk_mul(a.mk_int(12), py), pm, a.mk_int(-1) };
     expr_ref t(a.mk_add(4, t_args), m);
-    expr_ref oy(a.mk_add(y, a.mk_idiv(t, a.mk_int(12))), m);
-    expr_ref om(a.mk_add(a.mk_mod(t, a.mk_int(12)), a.mk_int(1)), m);
+    out_y = a.mk_add(y, a.mk_idiv(t, a.mk_int(12)));
+    out_m = a.mk_add(a.mk_mod(t, a.mk_int(12)), a.mk_int(1));
     // step 2 -- end-of-month clamp
-    expr_ref dim(mk_days_in_month_expr(oy, om), m);
-    expr_ref clamp(m.mk_ite(a.mk_le(d, dim), d, dim), m);
-    // step 3 -- day carry via the day-number bijection
-    return expr_ref(a.mk_add(mk_rata_die_expr(oy, om, clamp), pd), m);
+    expr_ref dim(mk_days_in_month_expr(out_y, out_m), m);
+    out_d = m.mk_ite(a.mk_le(d, dim), d, dim);
 }

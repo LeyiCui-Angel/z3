@@ -24,6 +24,7 @@ br_status date_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * co
     case OP_DATE_YEAR:
     case OP_DATE_MONTH:
     case OP_DATE_DAY:
+    case OP_DATE_RATA:
         SASSERT(num_args == 1);
         return mk_date_selector(f->get_decl_kind(), args[0], result);
     case OP_DATE_ADD:
@@ -52,6 +53,7 @@ br_status date_rewriter::mk_date_selector(decl_kind k, expr* a, expr_ref& result
     case OP_DATE_YEAR:  result = m_util.arith().mk_int(y);  break;
     case OP_DATE_MONTH: result = m_util.arith().mk_int(mo); break;
     case OP_DATE_DAY:   result = m_util.arith().mk_int(d);  break;
+    case OP_DATE_RATA:  result = m_util.arith().mk_int(date_util::rata_die(y, mo, d)); break;
     default: return BR_FAILED;
     }
     return BR_DONE;
