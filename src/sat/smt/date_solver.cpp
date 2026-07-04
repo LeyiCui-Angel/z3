@@ -17,7 +17,6 @@ Author:
 #include "ast/ast_pp.h"
 #include "sat/smt/date_solver.h"
 #include "sat/smt/euf_solver.h"
-#include "sat/smt/arith_value.h"
 
 namespace date {
 
@@ -64,12 +63,22 @@ namespace date {
             add_unit(eq_internalize(u().mk_year(t), m_arith.mk_int(vy)));
             add_unit(eq_internalize(u().mk_month(t), m_arith.mk_int(vm)));
             add_unit(eq_internalize(u().mk_day(t), m_arith.mk_int(vd)));
+            if (!u().is_mk(t))
+                add_unit(eq_internalize(t, u().mk_date(vy, vm, vd)));
             return;
         }
         expr_ref_vector fmls(m);
         u().mk_term_spec(t, fmls);
         for (expr* f : fmls)
             assert_axiom(f);
+        // Extensionality: equate the term with the date.mk application of
+        // its own selectors. Together with congruence and the equality
+        // propagation of the arithmetic solver over shared terms, this
+        // forces dates with equal components to be equal.
+        if (!u().is_mk(t)) {
+            expr_ref mk(u().mk_date(u().mk_year(t), u().mk_month(t), u().mk_day(t)), m);
+            add_unit(eq_internalize(t, mk));
+        }
     }
 
     void solver::internalize_cmp(app* atom) {
@@ -157,50 +166,12 @@ namespace date {
     }
 
     sat::check_result solver::check() {
-        // Extensionality: two date terms whose components agree in the
-        // arithmetic model must be equal. Instantiate the extensionality
-        // lemma for pairs of candidate terms found in distinct classes.
-        arith::arith_value av(ctx);
-        obj_map<enode, expr*> root2term;
-        for (expr* t : m_terms) {
-            enode* n = expr2enode(t);
-            if (!n)
-                continue;
-            enode* r = n->get_root();
-            if (!root2term.contains(r))
-                root2term.insert(r, t);
-        }
-        auto component_values = [&](expr* t, rational& y, rational& mo, rational& d) {
-            expr_ref ye(u().mk_year(t), m), me(u().mk_month(t), m), de(u().mk_day(t), m);
-            return
-                expr2enode(ye) && av.get_value(ye, y) &&
-                expr2enode(me) && av.get_value(me, mo) &&
-                expr2enode(de) && av.get_value(de, d);
-        };
-        ptr_vector<expr> reps;
-        for (auto const& kv : root2term)
-            reps.push_back(kv.m_value);
-        bool added = false;
-        for (unsigned i = 0; i < reps.size(); ++i) {
-            rational y1, m1, d1;
-            if (!component_values(reps[i], y1, m1, d1))
-                continue;
-            for (unsigned j = i + 1; j < reps.size(); ++j) {
-                rational y2, m2, d2;
-                if (!component_values(reps[j], y2, m2, d2))
-                    continue;
-                if (y1 != y2 || m1 != m2 || d1 != d2)
-                    continue;
-                expr* a = reps[i], *b = reps[j];
-                literal eq_y = eq_internalize(u().mk_year(a), u().mk_year(b));
-                literal eq_m = eq_internalize(u().mk_month(a), u().mk_month(b));
-                literal eq_d = eq_internalize(u().mk_day(a), u().mk_day(b));
-                literal eq   = eq_internalize(a, b);
-                add_clause(~eq_y, ~eq_m, ~eq_d, eq);
-                added = true;
-            }
-        }
-        return added ? sat::check_result::CR_CONTINUE : sat::check_result::CR_DONE;
+        // Extensionality is enforced structurally: every date term is
+        // equated with the date.mk application of its selectors when it is
+        // axiomatized, so congruence plus the arithmetic solver's equality
+        // propagation over shared terms identifies dates with equal
+        // components. Nothing is left to do at final check.
+        return sat::check_result::CR_DONE;
     }
 
     expr* solver::find_axiomatized(enode* n) {
