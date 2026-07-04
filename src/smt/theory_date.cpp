@@ -46,7 +46,11 @@ namespace smt {
         m_rw(r);
         if (m.is_true(r))
             return;
-        literal l = mk_literal(r);
+        assert_axiom_raw(r);
+    }
+
+    void theory_date::assert_axiom_raw(expr* e) {
+        literal l = mk_literal(e);
         ctx.mark_as_relevant(l);
         ctx.mk_th_axiom(get_id(), 1, &l);
     }
@@ -77,6 +81,26 @@ namespace smt {
         assert_axiom(m.mk_eq(u.mk_rata(x), u.mk_rata_die_expr(y, mo, d)));
         if (!u.is_mk(x))
             assert_axiom(m.mk_eq(x, u.mk_mk(y, mo, d)));
+        // the day-number map is injective on calendar-valid dates: dates
+        // with equal day numbers are equal. Instantiated pairwise so that
+        // equality of dates follows from day-number reasoning without
+        // inverting the day-number function arithmetically.
+        for (theory_var w = 0; w < v; ++w) {
+            expr* xw = get_enode(w)->get_expr();
+            expr_ref req(m.mk_eq(u.mk_rata(x), u.mk_rata(xw)), m);
+            m_rw(req);
+            if (m.is_false(req))
+                continue;
+            literal deq = mk_eq(x, xw, false);
+            ctx.mark_as_relevant(deq);
+            if (m.is_true(req)) {
+                ctx.mk_th_axiom(get_id(), 1, &deq);
+                continue;
+            }
+            literal leq = mk_literal(req);
+            ctx.mark_as_relevant(leq);
+            ctx.mk_th_axiom(get_id(), ~leq, deq);
+        }
     }
 
     /**
@@ -90,6 +114,18 @@ namespace smt {
         expr* y = t->get_arg(0);
         expr* mo = t->get_arg(1);
         expr* d = t->get_arg(2);
+        arith_util& a = u.arith();
+        rational ry, rm, rd;
+        if (u.is_value_mk(t, ry, rm, rd)) {
+            // keep the selector terms of concrete dates in the e-graph
+            // (unsimplified) so that congruence links them to the selectors
+            // of terms the date is equated with
+            assert_axiom_raw(m.mk_eq(u.mk_year(t), a.mk_int(ry)));
+            assert_axiom_raw(m.mk_eq(u.mk_month(t), a.mk_int(rm)));
+            assert_axiom_raw(m.mk_eq(u.mk_day(t), a.mk_int(rd)));
+            assert_axiom_raw(m.mk_eq(u.mk_rata(t), a.mk_int(date_util::rata_die(ry, rm, rd))));
+            return;
+        }
         expr_ref valid(u.mk_valid_expr(y, mo, d), m);
         m_rw(valid);
         if (m.is_false(valid))

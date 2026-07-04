@@ -44,6 +44,11 @@ namespace date {
         add_unit(mk_literal(r));
     }
 
+    void solver::add_axiom_unit_raw(expr* e) {
+        expr_ref r(e, m);
+        add_unit(mk_literal(r));
+    }
+
     /**
        Assert for the Date term of n:
        - validity of the selector triple, and
@@ -73,6 +78,18 @@ namespace date {
         expr* y = t->get_arg(0);
         expr* mo = t->get_arg(1);
         expr* d = t->get_arg(2);
+        arith_util& a = u.arith();
+        rational ry, rm, rd;
+        if (u.is_value_mk(t, ry, rm, rd)) {
+            // keep the selector terms of concrete dates in the e-graph
+            // (unsimplified) so that congruence links them to the selectors
+            // of terms the date is equated with
+            add_axiom_unit_raw(m.mk_eq(u.mk_year(t), a.mk_int(ry)));
+            add_axiom_unit_raw(m.mk_eq(u.mk_month(t), a.mk_int(rm)));
+            add_axiom_unit_raw(m.mk_eq(u.mk_day(t), a.mk_int(rd)));
+            add_axiom_unit_raw(m.mk_eq(u.mk_rata(t), a.mk_int(date_util::rata_die(ry, rm, rd))));
+            return;
+        }
         expr_ref valid(u.mk_valid_expr(y, mo, d), m);
         m_rw(valid);
         if (m.is_false(valid))
@@ -158,9 +175,35 @@ namespace date {
             return n->get_th_var(get_id());
         euf::theory_var v = th_euf_solver::mk_var(n);
         ctx.attach_th_var(n, this, v);
-        if (u.is_date(n->get_expr()))
+        if (u.is_date(n->get_expr())) {
             add_date_axioms(n);
+            add_injectivity_axioms(n->get_expr(), v);
+        }
         return v;
+    }
+
+    /**
+       The day-number map is injective on calendar-valid dates: dates with
+       equal day numbers are equal. Instantiated pairwise so that equality
+       of dates follows from day-number reasoning without inverting the
+       day-number function arithmetically.
+    */
+    void solver::add_injectivity_axioms(expr* x, euf::theory_var v) {
+        for (euf::theory_var w = 0; w < v; ++w) {
+            expr* xw = var2expr(w);
+            if (!u.is_date(xw))
+                continue;
+            expr_ref req(m.mk_eq(u.mk_rata(x), u.mk_rata(xw)), m);
+            m_rw(req);
+            if (m.is_false(req))
+                continue;
+            sat::literal deq = eq_internalize(x, xw);
+            if (m.is_true(req)) {
+                add_unit(deq);
+                continue;
+            }
+            add_clause(~mk_literal(req), deq);
+        }
     }
 
     sat::literal solver::internalize(expr* e, bool sign, bool root) {

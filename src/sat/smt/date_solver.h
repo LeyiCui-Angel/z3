@@ -40,10 +40,12 @@ namespace date {
 
         euf::theory_var mk_var(euf::enode* n) override;
         void add_axiom_unit(expr* e);
+        void add_axiom_unit_raw(expr* e);
         void add_date_axioms(euf::enode* n);
         void add_mk_axioms(app* t);
         void add_arith_axioms(app* t);
         void add_cmp_axioms(sat::literal lit, app* atom);
+        void add_injectivity_axioms(expr* x, euf::theory_var v);
         euf::enode* selector_enode(euf::enode* n, decl_kind k) const;
 
     public:

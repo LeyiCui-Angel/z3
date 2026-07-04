@@ -57,6 +57,7 @@ namespace smt {
         // the arithmetic solver on its linear fragment and evaluates the
         // calendar functions on concrete dates
         void assert_axiom(expr* e);
+        void assert_axiom_raw(expr* e);
         void add_mk_axioms(app* t);
         void add_arith_axioms(app* t);
         void add_cmp_axioms(literal lit, app* atom);
