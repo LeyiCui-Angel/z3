@@ -1,0 +1,7 @@
+(set-logic ALL)
+(declare-const a Date)
+(declare-const b Date)
+(assert (= a (date.mk 2023 2 29)))
+(assert (= b (date.mk 2023 2 29)))
+(assert (distinct a b))
+(check-sat)

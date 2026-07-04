@@ -1,0 +1,5 @@
+(set-logic ALL)
+(declare-const r Date)
+(assert (= r (date.sub (date.mk 2020 1 15) 0 1 0)))
+(assert (distinct (date.year r) 2019))
+(check-sat)

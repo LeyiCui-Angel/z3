@@ -1,0 +1,7 @@
+(set-logic ALL)
+(declare-const d Date)
+(declare-const r Date)
+(assert (= r (date.add (date.add d 0 6 0) 0 6 0)))
+(assert (= (date.day d) 15))
+(assert (distinct (date.year r) (+ (date.year d) 1)))
+(check-sat)

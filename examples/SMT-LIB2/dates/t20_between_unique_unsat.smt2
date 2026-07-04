@@ -1,0 +1,6 @@
+(set-logic ALL)
+(declare-const d Date)
+(assert (date.gt d (date.mk 2020 6 1)))
+(assert (date.lt d (date.mk 2020 6 3)))
+(assert (distinct (date.day d) 2))
+(check-sat)

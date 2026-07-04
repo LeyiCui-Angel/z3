@@ -1,0 +1,5 @@
+(set-logic ALL)
+(declare-const r Date)
+(assert (= r (date.add (date.mk 2096 2 29) 4 0 0)))
+(assert (= (date.day r) 29))
+(check-sat)

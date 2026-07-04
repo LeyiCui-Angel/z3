@@ -1,0 +1,7 @@
+(set-logic ALL)
+(declare-const a Date)
+(declare-const b Date)
+(assert (date.le a b))
+(assert (date.ge a b))
+(assert (distinct a b))
+(check-sat)

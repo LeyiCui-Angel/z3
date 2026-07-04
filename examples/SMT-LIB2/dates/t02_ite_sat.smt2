@@ -1,0 +1,6 @@
+(set-logic ALL)
+(declare-const b Bool)
+(declare-const d Date)
+(assert (= d (ite b (date.mk 2020 1 1) (date.mk 2021 1 1))))
+(assert (= (date.year d) 2020))
+(check-sat)

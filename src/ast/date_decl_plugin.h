@@ -72,7 +72,11 @@ enum date_op_kind {
     OP_DATE_LT,
     OP_DATE_LE,
     OP_DATE_GT,
-    OP_DATE_GE
+    OP_DATE_GE,
+    // internal only: epoch day number (days since 1970-01-01) of a date.
+    // Not exposed through the SMT-LIB front-end; used by the theory
+    // solvers to share the epoch of a date term across axioms.
+    OP_DATE_EPOCH
 };
 
 class date_decl_plugin : public decl_plugin {
@@ -150,6 +154,7 @@ public:
     app* mk_year(expr* d) { return m.mk_app(m_fid, OP_DATE_YEAR, d); }
     app* mk_month(expr* d) { return m.mk_app(m_fid, OP_DATE_MONTH, d); }
     app* mk_day(expr* d) { return m.mk_app(m_fid, OP_DATE_DAY, d); }
+    app* mk_epoch_term(expr* d) { return m.mk_app(m_fid, OP_DATE_EPOCH, d); }
 
     bool is_mk(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_MK); }
     bool is_year(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_YEAR); }
@@ -157,6 +162,7 @@ public:
     bool is_day(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_DAY); }
     bool is_add(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_ADD); }
     bool is_sub(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_SUB); }
+    bool is_epoch(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_EPOCH); }
     bool is_lt(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_LT); }
     bool is_le(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_LE); }
     bool is_gt(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_GT); }
@@ -195,7 +201,8 @@ public:
     // date.mk application, the selector terms otherwise
     void components(expr* d, expr_ref& y, expr_ref& mo, expr_ref& dd);
 
-    // epoch day number of a date term, in terms of its components
+    // epoch day number of a date term: a numeral for ground terms, the
+    // shared internal term (date.epoch! d) otherwise
     expr_ref mk_epoch(expr* d);
 
     // formulas asserting calendar validity of the components (y, mo, d)
@@ -206,18 +213,20 @@ public:
     // agree with it, otherwise the term is unconstrained (fresh valid date)
     void mk_mk_spec(expr* y, expr* mo, expr* d, expr* ty, expr* tm, expr* td, expr_ref_vector& fmls);
 
-    // formulas defining the selectors (ry, rm, rd) of (date.add b py pm pd)
-    // (or date.sub when sub is true) from the components (by, bm, bd) of b
-    void mk_add_spec(expr* by, expr* bm, expr* bd,
-                     expr* py, expr* pm, expr* pd, bool sub,
-                     expr* ry, expr* rm, expr* rd,
-                     expr_ref_vector& fmls);
-
     // all defining formulas for the date term t: calendar validity of its
-    // selectors plus, for date.mk/date.add/date.sub applications, the
-    // arithmetic definition of the operation
+    // selectors, the definition of its epoch term, and, for
+    // date.mk/date.add/date.sub applications, the arithmetic definition
+    // of the operation
     void mk_term_spec(expr* t, expr_ref_vector& fmls);
 
-    // arithmetic definition of a comparison between the date terms a and b
+    // arithmetic definition of a comparison between the date terms a and b,
+    // as a comparison of epoch day numbers
     expr_ref mk_cmp_spec(decl_kind k, expr* a, expr* b);
+
+    // equivalent definition of the comparison as a lexicographic comparison
+    // of the (year, month, day) components. Asserting both definitions is
+    // redundant but lets the arithmetic solver pick the cheaper route:
+    // the epoch form composes with date.add/date.sub, the lexicographic
+    // form makes order-theoretic facts (e.g. antisymmetry) shallow.
+    expr_ref mk_cmp_lex_spec(decl_kind k, expr* a, expr* b);
 };

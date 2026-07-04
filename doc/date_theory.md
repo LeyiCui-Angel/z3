@@ -98,15 +98,32 @@ For every term `t` of sort `Date` the solvers create the selector terms
 
 The day carry and the comparisons go through the bijection between valid
 dates and their **epoch day number** (days since 1970-01-01), using
-H. Hinnant's `days_from_civil` / `civil_from_days` algorithms. These use
-only integer division and modulus by positive constants, so the whole
-theory stays inside decidable linear integer arithmetic. For
-`date.add`/`date.sub` the solvers assert both the constructive definition
-of the result components (via `civil_from_days`) and the entailed "epoch
-coherence" equation `days_from_civil(result) = days_from_civil(clamped
-base) + pd`, which lets the arithmetic core refute identities such as
-`date.add d 0 0 1 = d` without reasoning about the bijection itself.
-Comparisons are translated to comparisons of epoch day numbers.
+H. Hinnant's `days_from_civil` algorithm. It uses only integer division
+and modulus by positive constants, so the whole theory stays inside
+decidable linear integer arithmetic. Every date term `t` gets an internal
+shared epoch term `(date.epoch! t)` (an operator of the date family that
+is *not* exposed through the SMT-LIB front-end), defined by
+`date.epoch!(t) = days_from_civil(year t, month t, day t)`. On top of it:
+
+- `date.add`/`date.sub` assert
+  `date.epoch!(r) = days_from_civil(y1, m1, d1) + pd`, where `(y1, m1, d1)`
+  is the clamped normalized base; when the month offset is a zero literal
+  this collapses to the linear equation
+  `date.epoch!(r) = date.epoch!(base) + pd` over shared epoch terms, so
+  chains of date arithmetic compose linearly and identities such as
+  `date.add d 0 0 1 = d` are refuted without reasoning about the epoch
+  bijection. The result components are *not* defined constructively from
+  the epoch: calendar validity plus the epoch definition already
+  determine them (the epoch map is a bijection between valid dates and
+  integers), and the redundant `civil_from_days` division towers
+  measurably slow the arithmetic solvers on chained arithmetic
+  (`civil_from_days` survives only in `date_util::days_to_civil`, the
+  concrete C++ evaluator).
+- comparisons are asserted with **two** equivalent definitions: the order
+  on epoch day numbers, and the lexicographic order on the components.
+  Each is entailed by the rest of the theory, and the arithmetic solver
+  uses whichever route is shallow (epoch for day arithmetic, lexicographic
+  for order-theoretic facts such as antisymmetry).
 
 Extensionality (decision 7) is enforced per pipeline:
 
@@ -146,6 +163,14 @@ Registration touch points: `src/ast/reg_decl_plugins.cpp`,
 `src/cmd_context/cmd_context.{h,cpp}` (`logic_has_date`),
 `src/ast/rewriter/th_rewriter.cpp`, `src/model/model_evaluator.cpp`,
 `src/smt/smt_setup.{h,cpp}`, `src/sat/smt/euf_solver.cpp`.
+
+### Tests
+
+Besides the 16 examples of the task setup, `examples/SMT-LIB2/dates/`
+contains a 23-case regression suite (expected verdicts in the filenames)
+covering ite-linkage of ground dates, extensionality, proleptic years,
+century leap rules, invalid-constructor congruence, order-theoretic facts
+and incremental solving.
 
 ### Running
 

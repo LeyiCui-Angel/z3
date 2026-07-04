@@ -63,6 +63,7 @@ namespace date {
             add_unit(eq_internalize(u().mk_year(t), m_arith.mk_int(vy)));
             add_unit(eq_internalize(u().mk_month(t), m_arith.mk_int(vm)));
             add_unit(eq_internalize(u().mk_day(t), m_arith.mk_int(vd)));
+            add_unit(eq_internalize(u().mk_epoch_term(t), m_arith.mk_int(date_util::civil_to_days(vy, vm, vd))));
             if (!u().is_mk(t))
                 add_unit(eq_internalize(t, u().mk_date(vy, vm, vd)));
             return;
@@ -83,7 +84,9 @@ namespace date {
 
     void solver::internalize_cmp(app* atom) {
         literal lit = expr2literal(atom);
-        expr_ref spec = u().mk_cmp_spec(atom->get_decl()->get_decl_kind(), atom->get_arg(0), atom->get_arg(1));
+        decl_kind k = atom->get_decl()->get_decl_kind();
+        expr* a = atom->get_arg(0), *b = atom->get_arg(1);
+        expr_ref spec = u().mk_cmp_spec(k, a, b);
         m_rewrite(spec);
         if (m.is_true(spec)) {
             add_unit(lit);
@@ -95,6 +98,13 @@ namespace date {
         }
         literal slit = mk_literal(spec);
         add_equiv(lit, slit);
+        // redundant lexicographic definition; see date_util::mk_cmp_lex_spec
+        expr_ref lex = u().mk_cmp_lex_spec(k, a, b);
+        m_rewrite(lex);
+        if (m.is_true(lex) || m.is_false(lex))
+            return;
+        literal llit = mk_literal(lex);
+        add_equiv(lit, llit);
     }
 
     sat::literal solver::internalize(expr* e, bool sign, bool root) {
@@ -143,8 +153,8 @@ namespace date {
         else if (u().is_comparison(e))
             internalize_cmp(t);
         else {
-            // selector term: its date argument carries the axioms
-            SASSERT(u().is_year(e) || u().is_month(e) || u().is_day(e));
+            // selector or epoch term: its date argument carries the axioms
+            SASSERT(u().is_year(e) || u().is_month(e) || u().is_day(e) || u().is_epoch(e));
             ensure_axioms(t->get_arg(0));
         }
         return true;

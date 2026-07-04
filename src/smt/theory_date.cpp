@@ -82,6 +82,7 @@ namespace smt {
             assert_eq_axiom(u().mk_year(t), m_arith.mk_int(vy));
             assert_eq_axiom(u().mk_month(t), m_arith.mk_int(vm));
             assert_eq_axiom(u().mk_day(t), m_arith.mk_int(vd));
+            assert_eq_axiom(u().mk_epoch_term(t), m_arith.mk_int(date_util::civil_to_days(vy, vm, vd)));
             return;
         }
         expr_ref_vector fmls(m);
@@ -97,7 +98,9 @@ namespace smt {
     }
 
     void theory_date::internalize_cmp(literal lit, app* atom) {
-        expr_ref spec = u().mk_cmp_spec(atom->get_decl()->get_decl_kind(), atom->get_arg(0), atom->get_arg(1));
+        decl_kind k = atom->get_decl()->get_decl_kind();
+        expr* a = atom->get_arg(0), *b = atom->get_arg(1);
+        expr_ref spec = u().mk_cmp_spec(k, a, b);
         m_rewrite(spec);
         if (m.is_true(spec)) {
             ctx.mk_th_axiom(get_id(), 1, &lit);
@@ -112,6 +115,15 @@ namespace smt {
         ctx.mark_as_relevant(slit);
         ctx.mk_th_axiom(get_id(), ~lit, slit);
         ctx.mk_th_axiom(get_id(), lit, ~slit);
+        // redundant lexicographic definition; see date_util::mk_cmp_lex_spec
+        expr_ref lex = u().mk_cmp_lex_spec(k, a, b);
+        m_rewrite(lex);
+        if (m.is_true(lex) || m.is_false(lex))
+            return;
+        literal llit = mk_literal(lex);
+        ctx.mark_as_relevant(llit);
+        ctx.mk_th_axiom(get_id(), ~lit, llit);
+        ctx.mk_th_axiom(get_id(), lit, ~llit);
     }
 
     bool theory_date::internalize_atom(app* atom, bool gate_ctx) {
@@ -136,8 +148,8 @@ namespace smt {
         if (is_date(term))
             ensure_axioms(term);
         else {
-            // selector term: its date argument carries the axioms
-            SASSERT(u().is_year(term) || u().is_month(term) || u().is_day(term));
+            // selector or epoch term: its date argument carries the axioms
+            SASSERT(u().is_year(term) || u().is_month(term) || u().is_day(term) || u().is_epoch(term));
             ensure_axioms(term->get_arg(0));
         }
         return true;

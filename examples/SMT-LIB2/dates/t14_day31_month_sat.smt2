@@ -1,0 +1,6 @@
+(set-logic ALL)
+(declare-const d Date)
+(assert (= (date.day d) 31))
+(assert (>= (date.month d) 4))
+(assert (<= (date.month d) 6))
+(check-sat)

@@ -41,6 +41,16 @@ br_status date_rewriter::mk_app_core(func_decl* f, unsigned num_args, expr* cons
     case OP_DATE_GE:
         SASSERT(num_args == 2);
         return mk_cmp(f->get_decl_kind(), args[0], args[1], result);
+    case OP_DATE_EPOCH: {
+        SASSERT(num_args == 1);
+        rational y, mo, dd;
+        if (m_util.eval_ground(args[0], y, mo, dd)) {
+            arith_util a(m());
+            result = a.mk_int(date_util::civil_to_days(y, mo, dd));
+            return BR_DONE;
+        }
+        return BR_FAILED;
+    }
     default:
         UNREACHABLE();
         return BR_FAILED;

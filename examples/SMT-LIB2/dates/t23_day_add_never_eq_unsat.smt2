@@ -1,0 +1,7 @@
+(set-logic ALL)
+(declare-const d Date)
+(declare-const k Int)
+(assert (>= k 1))
+(assert (<= k 1000))
+(assert (= (date.add d 0 0 k) d))
+(check-sat)

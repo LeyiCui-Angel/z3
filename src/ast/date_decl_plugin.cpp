@@ -90,6 +90,11 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
         if (check("date.sub", { m_date, i, i, i }))
             return m.mk_func_decl(symbol("date.sub"), arity, domain, m_date, func_decl_info(m_family_id, k));
         break;
+    case OP_DATE_EPOCH:
+        // internal operator, not exposed through the SMT-LIB front-end
+        if (check("date.epoch!", { m_date }))
+            return m.mk_func_decl(symbol("date.epoch!"), arity, domain, i, func_decl_info(m_family_id, k));
+        break;
     case OP_DATE_LT:
         if (check("date.lt", { m_date, m_date }))
             return m.mk_func_decl(symbol("date.lt"), arity, domain, m.mk_bool_sort(), func_decl_info(m_family_id, k));
@@ -435,7 +440,7 @@ void date_util::mk_days_to_civil(expr* zin, expr_ref& y, expr_ref& mo, expr_ref&
 
 void date_util::components(expr* d, expr_ref& y, expr_ref& mo, expr_ref& dd) {
     rational vy, vm, vd;
-    if (is_concrete_mk(d, vy, vm, vd) && is_valid_date(vy, vm, vd)) {
+    if (eval_ground(d, vy, vm, vd)) {
         y = num(vy); mo = num(vm); dd = num(vd);
         return;
     }
@@ -443,9 +448,10 @@ void date_util::components(expr* d, expr_ref& y, expr_ref& mo, expr_ref& dd) {
 }
 
 expr_ref date_util::mk_epoch(expr* d) {
-    expr_ref y(m), mo(m), dd(m);
-    components(d, y, mo, dd);
-    return mk_civil_to_days(y, mo, dd);
+    rational vy, vm, vd;
+    if (eval_ground(d, vy, vm, vd))
+        return num(civil_to_days(vy, vm, vd));
+    return expr_ref(mk_epoch_term(d), m);
 }
 
 // -----------------------------------
@@ -477,74 +483,102 @@ void date_util::mk_mk_spec(expr* y, expr* mo, expr* d, expr* ty, expr* tm, expr*
     fmls.push_back(m.mk_or(nvalid, feq(td, d)));
 }
 
-void date_util::mk_add_spec(expr* by, expr* bm, expr* bd,
-                            expr* py, expr* pm, expr* pd, bool sub,
-                            expr* ry, expr* rm, expr* rd,
-                            expr_ref_vector& fmls) {
-    rational sign(sub ? -1 : 1);
-    expr_ref spy(fmul(sign, py), m), spm(fmul(sign, pm), m), spd(fmul(sign, pd), m);
-
-    // 1. month normalization: t = bm + 12*py + pm - 1
-    expr_ref moff(fadd(fmul(rational(12), spy), spm), m);
-    expr_ref y1(m), m1(m);
-    rational vmoff;
-    if (get_num(moff, vmoff) && vmoff.is_zero()) {
-        // month and year are unchanged
-        y1 = by;
-        m1 = bm;
-    }
-    else {
-        expr_ref t(fadd(bm, fadd(moff, rational(-1))), m);
-        y1 = fadd(by, fidiv(t, rational(12)));
-        m1 = fadd(fmod(t, rational(12)), rational(1));
-    }
-
-    // 2. end-of-month clamp: d1 = min(bd, days_in_month(y1, m1))
-    expr_ref d1(m);
-    if (m1 == bm && y1 == by)
-        // same month: the clamp is a no-op since bd is calendar-valid
-        d1 = bd;
-    else {
-        expr_ref dim(mk_days_in_month(y1, m1), m);
-        d1 = fite(fle(bd, dim), bd, dim);
-    }
-
-    // 3. day carry through the epoch bijection
-    rational vpd;
-    if (get_num(spd, vpd) && vpd.is_zero()) {
-        // no day offset: the result is (y1, m1, d1) directly
-        fmls.push_back(feq(ry, y1));
-        fmls.push_back(feq(rm, m1));
-        fmls.push_back(feq(rd, d1));
-        return;
-    }
-    expr_ref epoch(fadd(mk_civil_to_days(y1, m1, d1), spd), m);
-    // constructive definition of the result components
-    expr_ref cy(m), cm(m), cd(m);
-    mk_days_to_civil(epoch, cy, cm, cd);
-    fmls.push_back(feq(ry, cy));
-    fmls.push_back(feq(rm, cm));
-    fmls.push_back(feq(rd, cd));
-    // epoch coherence: the epoch of the result equals the computed epoch.
-    // This is entailed, but gives the arithmetic solver a direct route for
-    // reasoning about compositions of date arithmetic and comparisons.
-    fmls.push_back(feq(mk_civil_to_days(ry, rm, rd), epoch));
-}
-
 void date_util::mk_term_spec(expr* t, expr_ref_vector& fmls) {
     SASSERT(is_date(t));
     expr_ref ty(mk_year(t), m), tm(mk_month(t), m), td(mk_day(t), m);
     mk_valid_spec(ty, tm, td, fmls);
+    // the epoch of the term is the shared handle for chronological
+    // comparisons and day arithmetic
+    expr_ref ep(mk_epoch_term(t), m);
+    fmls.push_back(feq(ep, mk_civil_to_days(ty, tm, td)));
     if (is_mk(t)) {
         app* a = to_app(t);
         mk_mk_spec(a->get_arg(0), a->get_arg(1), a->get_arg(2), ty, tm, td, fmls);
+        return;
     }
-    else if (is_add(t) || is_sub(t)) {
-        app* a = to_app(t);
-        expr_ref by(m), bm(m), bd(m);
-        components(a->get_arg(0), by, bm, bd);
-        mk_add_spec(by, bm, bd, a->get_arg(1), a->get_arg(2), a->get_arg(3), is_sub(t), ty, tm, td, fmls);
+    if (!is_add(t) && !is_sub(t))
+        return;
+
+    app* a = to_app(t);
+    expr* b = a->get_arg(0);
+    rational sign(is_sub(t) ? -1 : 1);
+    expr_ref spy(fmul(sign, a->get_arg(1)), m);
+    expr_ref spm(fmul(sign, a->get_arg(2)), m);
+    expr_ref spd(fmul(sign, a->get_arg(3)), m);
+
+    // 1. month normalization: t = bm + 12*py + pm - 1
+    expr_ref by(m), bm(m), bd(m);
+    components(b, by, bm, bd);
+    expr_ref moff(fadd(fmul(rational(12), spy), spm), m);
+    expr_ref y1(m), m1(m), d1(m);
+    rational vmoff;
+    bool same_month = get_num(moff, vmoff) && vmoff.is_zero();
+    if (same_month) {
+        // month and year are unchanged, and the end-of-month clamp is a
+        // no-op since the base is calendar-valid
+        y1 = by;
+        m1 = bm;
+        d1 = bd;
     }
+    else {
+        expr_ref tt(fadd(bm, fadd(moff, rational(-1))), m);
+        y1 = fadd(by, fidiv(tt, rational(12)));
+        m1 = fadd(fmod(tt, rational(12)), rational(1));
+        // 2. end-of-month clamp: d1 = min(bd, days_in_month(y1, m1))
+        expr_ref dim(mk_days_in_month(y1, m1), m);
+        d1 = fite(fle(bd, dim), bd, dim);
+    }
+
+    // 3. day carry over epoch day numbers
+    rational vpd;
+    if (get_num(spd, vpd) && vpd.is_zero()) {
+        // no day offset: the result is (y1, m1, d1) directly
+        fmls.push_back(feq(ty, y1));
+        fmls.push_back(feq(tm, m1));
+        fmls.push_back(feq(td, d1));
+        if (same_month)
+            // entailed, but links the epochs of result and base linearly
+            fmls.push_back(feq(ep, mk_epoch(b)));
+        return;
+    }
+    // epoch of the result: epoch of the clamped base plus the day offset.
+    // When the month is unchanged the clamped base is the base itself, so
+    // its shared epoch term keeps the relation linear. Together with the
+    // calendar validity of the result components and the epoch definition
+    // (the epoch map is a bijection between valid dates and integers),
+    // this equation fully determines the result.
+    expr_ref base_ep(same_month ? mk_epoch(b) : mk_civil_to_days(y1, m1, d1));
+    fmls.push_back(feq(ep, fadd(base_ep, spd)));
+    // Note: the inverse (constructive) definition of the components from
+    // the epoch via civil_from_days is deliberately not asserted. It is
+    // redundant, and the extra division towers measurably slow down the
+    // arithmetic solvers on chained date arithmetic.
+}
+
+expr_ref date_util::mk_cmp_lex_spec(decl_kind k, expr* a, expr* b) {
+    if (k == OP_DATE_GT)
+        return mk_cmp_lex_spec(OP_DATE_LT, b, a);
+    if (k == OP_DATE_GE)
+        return mk_cmp_lex_spec(OP_DATE_LE, b, a);
+    SASSERT(k == OP_DATE_LT || k == OP_DATE_LE);
+    expr_ref ay(m), am(m), ad(m), by(m), bm(m), bd(m);
+    components(a, ay, am, ad);
+    components(b, by, bm, bd);
+    rational va, vb;
+    expr_ref day_cmp(m);
+    if (k == OP_DATE_LT) {
+        if (get_num(ad, va) && get_num(bd, vb))
+            day_cmp = m.mk_bool_val(va < vb);
+        else
+            day_cmp = m_arith.mk_lt(ad, bd);
+    }
+    else
+        day_cmp = fle(ad, bd);
+    expr_ref lt_y(m), lt_m(m);
+    lt_y = (get_num(ay, va) && get_num(by, vb)) ? expr_ref(m.mk_bool_val(va < vb), m) : expr_ref(m_arith.mk_lt(ay, by), m);
+    lt_m = (get_num(am, va) && get_num(bm, vb)) ? expr_ref(m.mk_bool_val(va < vb), m) : expr_ref(m_arith.mk_lt(am, bm), m);
+    expr_ref tail(m.mk_or(lt_m, m.mk_and(feq(am, bm), day_cmp)), m);
+    return expr_ref(m.mk_or(lt_y, m.mk_and(feq(ay, by), tail)), m);
 }
 
 expr_ref date_util::mk_cmp_spec(decl_kind k, expr* a, expr* b) {

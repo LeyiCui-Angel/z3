@@ -1,0 +1,8 @@
+(set-logic ALL)
+(declare-const a Date)
+(declare-const b Date)
+(assert (= (date.year a) (date.year b)))
+(assert (= (date.month a) (date.month b)))
+(assert (= (date.day a) (date.day b)))
+(assert (distinct a b))
+(check-sat)

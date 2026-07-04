@@ -1,0 +1,7 @@
+(set-logic ALL)
+(declare-const r Date)
+(assert (= r (date.sub (date.mk 1 1 1) 0 0 1)))
+(assert (= (date.year r) 0))
+(assert (= (date.month r) 12))
+(assert (= (date.day r) 31))
+(check-sat)

@@ -1,0 +1,5 @@
+(set-logic ALL)
+(declare-const r Date)
+(assert (= r (date.add (date.mk 2023 12 31) 0 0 1)))
+(assert (or (distinct (date.year r) 2024) (distinct (date.month r) 1) (distinct (date.day r) 1)))
+(check-sat)
