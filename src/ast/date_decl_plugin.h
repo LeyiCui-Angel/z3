@@ -165,6 +165,10 @@ public:
 
     // \brief recognize (date.mk y m d) with integer numeral arguments.
     bool is_concrete_mk(expr const* e, rational& y, rational& mo, rational& d) const;
+    // \brief concretely evaluate a ground date term: a calendar-valid
+    // concrete date.mk application, or date.add/date.sub with numeral
+    // offsets applied to a ground date term.
+    bool eval_ground(expr const* e, rational& y, rational& mo, rational& d) const;
     // \brief recognize (date.mk y m d) with numeral arguments forming a valid date.
     bool is_value(expr const* e) const;
 

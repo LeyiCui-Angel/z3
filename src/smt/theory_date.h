@@ -45,6 +45,7 @@ namespace smt {
 
         void ensure_axioms(expr* t);
         void assert_axiom(expr* fml);
+        void assert_eq_axiom(expr* a, expr* b);
         void internalize_cmp(literal lit, app* atom);
         bool get_component_values(expr* t, rational& y, rational& mo, rational& d);
         bool is_date(expr* t) const { return m_util.is_date(t->get_sort()); }

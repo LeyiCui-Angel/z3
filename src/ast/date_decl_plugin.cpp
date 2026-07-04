@@ -182,6 +182,27 @@ bool date_util::is_value(expr const* e) const {
     return is_concrete_mk(e, y, mo, d) && is_valid_date(y, mo, d);
 }
 
+bool date_util::eval_ground(expr const* e, rational& y, rational& mo, rational& d) const {
+    if (is_concrete_mk(e, y, mo, d))
+        return is_valid_date(y, mo, d);
+    if (is_add(e) || is_sub(e)) {
+        app const* a = to_app(e);
+        rational py, pm, pd;
+        if (!m_arith.is_numeral(a->get_arg(1), py) || !m_arith.is_numeral(a->get_arg(2), pm) ||
+            !m_arith.is_numeral(a->get_arg(3), pd) || !py.is_int() || !pm.is_int() || !pd.is_int())
+            return false;
+        rational by, bm, bd;
+        if (!eval_ground(a->get_arg(0), by, bm, bd))
+            return false;
+        if (is_sub(e)) {
+            py.neg(); pm.neg(); pd.neg();
+        }
+        add_period(by, bm, bd, py, pm, pd, y, mo, d);
+        return true;
+    }
+    return false;
+}
+
 // -----------------------------------
 // concrete calendar arithmetic
 // -----------------------------------

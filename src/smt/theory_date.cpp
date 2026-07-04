@@ -64,10 +64,36 @@ namespace smt {
         ctx.push_trail(push_back_vector<ptr_vector<expr>>(m_terms));
         if (u().is_add(t) || u().is_sub(t))
             ensure_axioms(to_app(t)->get_arg(0));
+        // the selector terms hold the components in the model; make sure
+        // they are internalized and relevant so that model construction
+        // can depend on them
+        expr_ref sels[3] = { expr_ref(u().mk_year(t), m), expr_ref(u().mk_month(t), m), expr_ref(u().mk_day(t), m) };
+        for (expr_ref const& se : sels) {
+            if (!ctx.e_internalized(se))
+                ctx.internalize(se, false);
+            ctx.mark_as_relevant(ctx.get_enode(se));
+        }
+        rational vy, vm, vd;
+        if (u().eval_ground(t, vy, vm, vd)) {
+            // Concretely evaluated term: assert the exact component values
+            // without simplification. The rewriter would fold the selector
+            // applications away, losing the egraph link between the term
+            // and its components.
+            assert_eq_axiom(u().mk_year(t), m_arith.mk_int(vy));
+            assert_eq_axiom(u().mk_month(t), m_arith.mk_int(vm));
+            assert_eq_axiom(u().mk_day(t), m_arith.mk_int(vd));
+            return;
+        }
         expr_ref_vector fmls(m);
         u().mk_term_spec(t, fmls);
         for (expr* f : fmls)
             assert_axiom(f);
+    }
+
+    void theory_date::assert_eq_axiom(expr* a, expr* b) {
+        literal lit = mk_eq(a, b, false);
+        ctx.mark_as_relevant(lit);
+        ctx.mk_th_axiom(get_id(), 1, &lit);
     }
 
     void theory_date::internalize_cmp(literal lit, app* atom) {
