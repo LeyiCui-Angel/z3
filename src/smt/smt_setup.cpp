@@ -831,7 +831,12 @@ namespace smt {
             return;
 
         if (st.m_has_bv && !st.m_has_fpa && st.m_num_quantifiers == 0)
-             m_params.m_relevancy_lvl = 0;           
+             m_params.m_relevancy_lvl = 0;
+
+        // relevancy-gated div/mod/ite axioms interact poorly with the
+        // integer terms produced by the date theory reduction
+        if (st.m_theories.get(m_manager.mk_family_id("date"), false) && st.m_num_quantifiers == 0)
+             m_params.m_relevancy_lvl = 0;
     }
 
     void setup::setup_unknown(static_features & st) {
