@@ -356,6 +356,7 @@ protected:
     bool logic_has_array() const;
     bool logic_has_datatype() const;
     bool logic_has_fpa() const;
+    bool logic_has_date() const;
     bool logic_has_recfun() const;
 
     void print_unsupported_msg() { regular_stream() << "unsupported" << std::endl; }

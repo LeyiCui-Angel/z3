@@ -30,6 +30,7 @@ public:
     static bool logic_has_seq(symbol const & s);
     static bool logic_has_str(symbol const & s);
     static bool logic_has_fpa(symbol const & s);
+    static bool logic_has_date(symbol const & s);
     static bool logic_has_horn(symbol const& s);
     static bool logic_has_pb(symbol const& s);
     static bool logic_has_fd(symbol const& s) { return s == "QF_FD"; }

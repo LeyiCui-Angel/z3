@@ -31,6 +31,7 @@ Notes:
 #include "ast/seq_decl_plugin.h"
 #include "ast/pb_decl_plugin.h"
 #include "ast/fpa_decl_plugin.h"
+#include "ast/date_decl_plugin.h"
 #include "ast/special_relations_decl_plugin.h"
 #include "ast/ast_pp.h"
 #include "ast/pp.h"
@@ -800,6 +801,10 @@ bool cmd_context::logic_has_fpa() const {
     return !has_logic() || smt_logics::logic_has_fpa(m_logic);
 }
 
+bool cmd_context::logic_has_date() const {
+    return !has_logic() || smt_logics::logic_has_date(m_logic);
+}
+
 bool cmd_context::logic_has_array() const {
     return !has_logic() || smt_logics::logic_has_array(m_logic);
 }
@@ -827,6 +832,7 @@ void cmd_context::init_manager_core(bool new_manager) {
         register_plugin(symbol("seq"),      alloc(seq_decl_plugin), logic_has_seq());
         register_plugin(symbol("pb"),       alloc(pb_decl_plugin), logic_has_pb());
         register_plugin(symbol("fpa"),      alloc(fpa_decl_plugin), logic_has_fpa());
+        register_plugin(symbol("date"),     alloc(date_decl_plugin), logic_has_date());
         register_plugin(symbol("datalog_relation"), alloc(datalog::dl_decl_plugin), !has_logic());
         register_plugin(symbol("specrels"), alloc(special_relations_decl_plugin), !has_logic());
     }
@@ -844,6 +850,7 @@ void cmd_context::init_manager_core(bool new_manager) {
         load_plugin(symbol("char"),     logic_has_seq(), fids);
         load_plugin(symbol("seq"),      logic_has_seq(), fids);
         load_plugin(symbol("fpa"),      logic_has_fpa(), fids);
+        load_plugin(symbol("date"),     logic_has_date(), fids);
         load_plugin(symbol("pb"),       logic_has_pb(), fids);
 
         for (family_id fid : fids) {

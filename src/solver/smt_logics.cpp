@@ -103,6 +103,10 @@ bool smt_logics::logic_has_fpa(symbol const & s) {
            logic_is_all(s);
 }
 
+bool smt_logics::logic_has_date(symbol const & s) {
+    return logic_is_all(s);
+}
+
 bool smt_logics::logic_has_uf(symbol const & s) {
     auto str = s.str();
     return 

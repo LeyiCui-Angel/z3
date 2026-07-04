@@ -13,6 +13,8 @@ z3_add_component(rewriter
     char_rewriter.cpp
     datatype_rewriter.cpp
     der.cpp
+    date_axioms.cpp
+    date_rewriter.cpp
     distribute_forall.cpp
     dl_rewriter.cpp
     dom_simplifier.cpp

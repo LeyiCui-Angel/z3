@@ -28,6 +28,7 @@ z3_add_component(sat_smt
     euf_solver.cpp
     intblast_solver.cpp
     fpa_solver.cpp
+    date_solver.cpp
     pb_card.cpp
     pb_constraint.cpp
     pb_internalize.cpp
