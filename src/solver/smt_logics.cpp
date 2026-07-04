@@ -120,10 +120,14 @@ bool smt_logics::logic_has_pb(symbol const& s) {
 
 bool smt_logics::logic_has_datatype(symbol const& s) {
     auto str = s.str();
-    return 
+    return
         str.find("DT") != std::string::npos ||
         str == "QF_FD" ||
         logic_is_all(s) ||
         logic_has_horn(s);
+}
+
+bool smt_logics::logic_has_date(symbol const& s) {
+    return logic_is_all(s);
 }
 
