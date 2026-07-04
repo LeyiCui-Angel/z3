@@ -46,10 +46,12 @@ namespace smt {
     class theory_date : public theory {
         date_util        u;
         th_rewriter      m_rw;
-        // selector terms per theory variable; used for model construction
+        // selector terms per theory variable; used for model construction.
+        // m_pinned keeps them alive independently of the axioms they occur in.
         ptr_vector<app>  m_year;
         ptr_vector<app>  m_month;
         ptr_vector<app>  m_day;
+        expr_ref_vector  m_pinned;
 
         theory_var mk_th_var(enode* n);
         void ensure_date_axioms(enode* n);

@@ -32,7 +32,8 @@ namespace smt {
     theory_date::theory_date(context& ctx):
         theory(ctx, ctx.get_manager().mk_family_id("date")),
         u(ctx.get_manager()),
-        m_rw(ctx.get_manager(), date_rewriter_params()) {
+        m_rw(ctx.get_manager(), date_rewriter_params()),
+        m_pinned(ctx.get_manager()) {
     }
 
     theory_var theory_date::mk_th_var(enode* n) {
@@ -71,6 +72,9 @@ namespace smt {
         expr* x = n->get_expr();
         arith_util& a = u.arith();
         app_ref y(u.mk_year(x), m), mo(u.mk_month(x), m), d(u.mk_day(x), m);
+        m_pinned.push_back(y);
+        m_pinned.push_back(mo);
+        m_pinned.push_back(d);
         m_year.setx(v, y, nullptr);
         m_month.setx(v, mo, nullptr);
         m_day.setx(v, d, nullptr);

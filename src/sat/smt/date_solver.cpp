@@ -274,7 +274,7 @@ namespace date {
     }
 
     euf::enode* solver::selector_enode(euf::enode* n, decl_kind k) const {
-        expr* e = m.mk_app(get_id(), k, n->get_expr());
+        expr_ref e(m.mk_app(get_id(), k, n->get_expr()), m);
         return expr2enode(e);
     }
 
