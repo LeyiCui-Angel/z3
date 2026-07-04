@@ -39,6 +39,7 @@ Revision History:
 #include "smt/theory_sls.h"
 #include "smt/theory_pb.h"
 #include "smt/theory_fpa.h"
+#include "smt/theory_date.h"
 #include "smt/theory_polymorphism.h"
 
 namespace smt {
@@ -788,6 +789,10 @@ namespace smt {
         m_context.register_plugin(alloc(smt::theory_special_relations, m_context, m_manager));
     }
 
+    void setup::setup_date() {
+        m_context.register_plugin(alloc(smt::theory_date, m_context));
+    }
+
     void setup::setup_polymorphism() {
         if (m_manager.has_type_vars())
             m_context.register_plugin(alloc(theory_polymorphism, m_context));
@@ -808,6 +813,7 @@ namespace smt {
         setup_seq_str(st);
         setup_fpa();
         setup_special_relations();
+        setup_date();
         setup_polymorphism();
         setup_relevancy(st);
     }
@@ -830,6 +836,11 @@ namespace smt {
 
     void setup::setup_unknown(static_features & st) {
         TRACE(setup, tout << "setup_unknown\n";);
+        if (st.m_theories.get(m_manager.mk_family_id("date"), false)) {
+            // date constraints are only handled by the general setup
+            setup_unknown();
+            return;
+        }
         if (st.m_num_quantifiers > 0) {
             if (st.m_has_real)
                 setup_AUFLIRA(false);
@@ -842,6 +853,7 @@ namespace smt {
             setup_fpa();
             setup_recfuns();
             setup_special_relations();
+            setup_date();
             setup_polymorphism();
             return;
         }
