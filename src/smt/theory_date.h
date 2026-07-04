@@ -9,13 +9,13 @@ Abstract:
 
     Legacy-SMT theory solver for the native theory of calendar dates.
 
-    The solver is a lazy axiomatization / reduction theory: it does not
-    perform its own propagation.  Whenever a Date term or a date predicate
-    atom is internalized it injects helper axioms over integer arithmetic
-    and Booleans into the smt::context and delegates all reasoning to the
+    The solver is a lazy reduction theory: whenever a Date term or a date
+    comparison atom is internalized it asks date_axiom_gen for the defining
+    axioms (over the integer projections date.year / date.month / date.day)
+    and asserts them into the smt::context, delegating all reasoning to the
     arithmetic + EUF core.
 
-    See ast/date_decl_plugin.h and Dates.smt2 for the specification.
+    See ast/date_axioms.h and Dates.smt2 for the specification.
 
 Author:
 
@@ -25,6 +25,7 @@ Author:
 #pragma once
 
 #include "ast/date_decl_plugin.h"
+#include "ast/date_axioms.h"
 #include "ast/arith_decl_plugin.h"
 #include "ast/rewriter/th_rewriter.h"
 #include "smt/smt_theory.h"
@@ -34,51 +35,22 @@ namespace smt {
     class theory_date : public theory {
         date_util           du;
         arith_util          a;
-        th_rewriter         m_rw;          // normalize injected arithmetic
-        obj_hashtable<expr> m_processed;   // date terms whose axioms were emitted
-        expr_ref_vector     m_axioms;      // reduction axioms pending assertion
+        date_axiom_gen      m_gen;
+        th_rewriter         m_rw;          // normalize the reduced arithmetic
+        obj_hashtable<expr> m_processed;   // date terms/atoms already reduced
+        expr_ref_vector     m_axioms;      // reduced axioms pending assertion
 
         theory_var mk_var(enode* n) override;
 
-        // axiom emission.  assert_axiom() only buffers the formula: the
-        // helper builders assert their side constraints (div/mod definitions)
-        // mid-construction, and running the rewriter then -- while raw,
-        // unreferenced intermediate terms are still live -- would corrupt the
-        // ast.  flush_axioms() rewrites and asserts the buffer once the term
-        // is fully built, at the top of internalize_term / internalize_atom.
-        void assert_axiom(expr* fml);
-        void flush_axioms();
+        // Axioms are buffered while a term is being reduced and asserted only
+        // once it is fully built: rewriting mid-construction would run while
+        // raw, unreferenced intermediate terms are still live.  Injecting the
+        // rewritten formulas via mk_th_axiom keeps theory_arith / theory_lra
+        // from reporting spurious incompleteness (they need the normalized
+        // form the rewriter produces).
         void emit_date_axioms(expr* t);
-        void emit_add_axioms(app* t, bool is_sub);
         void internalize_predicate(app* atom);
-
-        // Euclidean div/mod by a positive constant, eliminated into fresh
-        // linear integer variables so the reduction stays inside LIA (raw
-        // div/mod terms injected at internalization make theory_arith
-        // report incompleteness).
-        void   mk_divmod(expr* x, int n, expr_ref& q, expr_ref& r);
-        expr_ref mk_emod(expr* x, int n);
-        expr_ref mk_ediv(expr* x, int n);
-
-        // term-vs-term comparisons, written with 0 on one side
-        expr* mk_le0(expr* x, expr* y);
-        expr* mk_lt0(expr* x, expr* y);
-
-        // calendar helper expressions
-        expr_ref mk_is_leap(expr* y);
-        expr_ref mk_days_in_month(expr* y, expr* m);
-        expr_ref mk_min(expr* x, expr* y);
-        expr_ref mk_valid(expr* y, expr* m, expr* d);
-        expr_ref mk_serial(expr* y, expr* m, expr* d);
-        expr_ref mk_lex_lt(expr* y1, expr* m1, expr* d1, expr* y2, expr* m2, expr* d2);
-
-        expr* neg_offset(expr* e, bool is_sub);
-        void  bind(expr_ref& e);
-        // date.add month-normalization (step 1) and end-of-month clamp (step 2)
-        void compute_norm(expr* d, expr* py, expr* pm,
-                          expr_ref& oy, expr_ref& om, expr_ref& clamp);
-        // date.add day carry (step 3), unfolded for a concrete offset k
-        void day_carry(expr_ref& oy, expr_ref& om, expr_ref& tmp, int64_t k);
+        void flush_axioms();
 
     public:
         theory_date(context& ctx);
