@@ -31,6 +31,7 @@ Author:
 #include "sat/smt/sls_solver.h"
 #include "sat/smt/recfun_solver.h"
 #include "sat/smt/specrel_solver.h"
+#include "sat/smt/date_solver.h"
 
 namespace euf {
 
@@ -135,6 +136,7 @@ namespace euf {
         datatype_util dt(m);
         recfun::util rf(m);
         special_relations_util sp(m);
+        date_util dateu(m);
         if (pb.get_family_id() == fid)
             ext = alloc(pb::solver, *this, fid);
         else if (bvu.get_family_id() == fid) {
@@ -159,6 +161,8 @@ namespace euf {
             ext = alloc(recfun::solver, *this);
         else if (sp.get_family_id() == fid)
             ext = alloc(specrel::solver, *this, fid);
+        else if (dateu.get_family_id() == fid)
+            ext = alloc(date::solver, *this, fid);
         
         if (ext) 
             add_solver(ext);        
