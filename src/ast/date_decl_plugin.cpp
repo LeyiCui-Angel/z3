@@ -344,9 +344,10 @@ expr_ref date_util::mk_add_axiom(app* t, bool& concrete) {
     expr* d = t->get_arg(0);
     expr_ref py(t->get_arg(1), m), pm(t->get_arg(2), m), pd(t->get_arg(3), m);
     if (is_sub(t)) {
-        py = a.mk_uminus(py);
-        pm = a.mk_uminus(pm);
-        pd = a.mk_uminus(pd);
+        rational v;
+        py = a.is_numeral(py, v) ? a.mk_int(-v) : a.mk_uminus(py);
+        pm = a.is_numeral(pm, v) ? a.mk_int(-v) : a.mk_uminus(pm);
+        pd = a.is_numeral(pd, v) ? a.mk_int(-v) : a.mk_uminus(pd);
     }
     rational ny, nm, nd, vy, vm, vd;
     if (is_concrete_date(d, ny, nm, nd) && is_valid_date(ny, nm, nd) &&
@@ -360,6 +361,13 @@ expr_ref date_util::mk_add_axiom(app* t, bool& concrete) {
         return expr_ref(m.mk_and(m.mk_eq(mk_year(t), a.mk_int(oy)),
                                  m.mk_eq(mk_month(t), a.mk_int(om)),
                                  m.mk_eq(mk_day(t), a.mk_int(od))), m);
+    }
+    if (a.is_numeral(py, vy) && vy.is_zero() && a.is_numeral(pm, vm) && vm.is_zero()) {
+        // pure day offset: month normalization is the identity and the
+        // end-of-month clamp is absorbed by validity of d, so the result
+        // is a plain shift of d's epoch day. Reusing the shared epoch term
+        // keeps the reasoning linear.
+        return expr_ref(m.mk_eq(mk_epoch_of_date(t), a.mk_add(mk_epoch_of_date(d), pd)), m);
     }
     expr_ref yd(mk_year(d), m), md(mk_month(d), m), dd(mk_day(d), m);
     // step 1 -- month normalization

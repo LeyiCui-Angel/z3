@@ -145,6 +145,10 @@ namespace date {
             bool concrete = false;
             expr_ref ax = m_util.mk_add_axiom(term, concrete);
             concrete ? queue_no_rewrite(ax) : queue_axiom(ax);
+            // eager epoch injectivity between the result and its base;
+            // resolves identities such as date.add(d,0,0,0) = d at the
+            // boolean level
+            queue_axiom(m_util.mk_diseq_axiom(term, term->get_arg(0)));
         }
         else if (m_util.is_lt(term) || m_util.is_le(term) || m_util.is_gt(term) || m_util.is_ge(term))
             queue_equiv(term, m_util.mk_compare_rhs(term));
