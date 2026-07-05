@@ -45,6 +45,7 @@ struct static_features {
     family_id                m_lfid;    
     family_id                m_arrfid;
     family_id                m_srfid;
+    family_id                m_datefid;
     ast_mark                 m_pre_processed, m_post_processed;
     bool                     m_cnf;
     unsigned                 m_num_exprs;             // 
@@ -80,6 +81,7 @@ struct static_features {
     bool                     m_has_real;        //
     bool                     m_has_bv;          //
     bool                     m_has_fpa;         //
+    bool                     m_has_date;        // has Date-sorted terms
     bool                     m_has_sr;          // has special relations
     bool                     m_has_str;         // has String-typed terms
     bool                     m_has_seq_non_str; // has non-String-typed Sequence terms

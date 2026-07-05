@@ -355,6 +355,7 @@ protected:
     bool logic_has_seq() const;
     bool logic_has_array() const;
     bool logic_has_datatype() const;
+    bool logic_has_date() const;
     bool logic_has_fpa() const;
     bool logic_has_recfun() const;
 
