@@ -212,7 +212,22 @@ expr_ref date_axioms::add_axiom(app* e) {
         pm = neg(pm);
         pd = neg(pd);
     }
-    rational rpy, rpm;
+    rational rpy, rpm, rpd;
+    if (a.is_numeral(pd, rpd) && rpd.is_zero()) {
+        // No day offset: the carry step is the identity, so the result is
+        // the month-normalized, end-of-month-clamped triple itself. The
+        // selector-level form propagates much better than the equation on
+        // Rata Die day numbers, which the integer solver would have to
+        // invert.
+        expr_ref t(a.mk_sub(a.mk_add(dt.mk_month(d), a.mk_add(a.mk_mul(mk_int(12), py), pm)), mk_int(1)), m);
+        expr_ref oy(a.mk_add(dt.mk_year(d), a.mk_idiv(t, mk_int(12))), m);
+        expr_ref om(a.mk_add(a.mk_mod(t, mk_int(12)), mk_int(1)), m);
+        expr_ref dim(mk_days_in_month(oy, om), m);
+        expr_ref cd(m.mk_ite(mk_le_atom(dt.mk_day(d), dim), dt.mk_day(d), dim), m);
+        return expr_ref(m.mk_and(m.mk_eq(dt.mk_year(e), oy),
+                                 m.mk_eq(dt.mk_month(e), om),
+                                 m.mk_eq(dt.mk_day(e), cd)), m);
+    }
     if (a.is_numeral(py, rpy) && rpy.is_zero() && a.is_numeral(pm, rpm) && rpm.is_zero()) {
         // Pure day offset: month normalization and the end-of-month clamp
         // are the identity on (calendar-valid) dates, so the result is a
@@ -227,7 +242,23 @@ expr_ref date_axioms::add_axiom(app* e) {
     expr_ref dim(mk_days_in_month(oy, om), m);
     expr_ref cd(m.mk_ite(mk_le_atom(dt.mk_day(d), dim), dt.mk_day(d), dim), m);
     // Step 3 -- day carry: shift the day number by pd.
-    return expr_ref(m.mk_eq(mk_rata_die(e), a.mk_add(mk_rata_die(oy, om, cd), pd)), m);
+    expr_ref def(m.mk_eq(mk_rata_die(e), a.mk_add(mk_rata_die(oy, om, cd), pd)), m);
+    // Redundant bounds linking the month offset M = 12*py + pm to the
+    // Rata Die delta: each traversed month has 28..31 days and the
+    // end-of-month clamp moves the day by at most -3. Implied by the
+    // definition together with validity of d, but not derivable by
+    // linear reasoning; without it a symbolic month offset leaves the
+    // integer solver searching an unbounded range.
+    expr_ref M(a.mk_add(a.mk_mul(mk_int(12), py), pm), m);
+    expr_ref D(a.mk_sub(mk_rata_die(e), a.mk_add(mk_rata_die(d), pd)), m);
+    expr_ref bounds(m.mk_and(
+        m.mk_implies(mk_le_atom(mk_int(0), M),
+                     m.mk_and(mk_le_atom(a.mk_sub(a.mk_mul(mk_int(28), M), mk_int(3)), D),
+                              mk_le_atom(D, a.mk_mul(mk_int(31), M)))),
+        m.mk_implies(mk_le_atom(M, mk_int(0)),
+                     m.mk_and(mk_le_atom(a.mk_sub(a.mk_mul(mk_int(31), M), mk_int(3)), D),
+                              mk_le_atom(D, a.mk_mul(mk_int(28), M))))), m);
+    return expr_ref(m.mk_and(def, bounds), m);
 }
 
 expr_ref date_axioms::cmp_axiom(app* atom) {
