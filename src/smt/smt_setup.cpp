@@ -32,6 +32,7 @@ Revision History:
 #include "smt/theory_recfun.h"
 #include "smt/theory_dummy.h"
 #include "smt/theory_dl.h"
+#include "smt/theory_date.h"
 #include "smt/theory_seq_empty.h"
 #include "smt/theory_seq.h"
 #include "smt/theory_char.h"
@@ -742,6 +743,10 @@ namespace smt {
         m_context.register_plugin(mk_theory_dl(m_context));
     }
 
+    void setup::setup_date() {
+        m_context.register_plugin(mk_theory_date(m_context));
+    }
+
     void setup::setup_seq_str(static_features const & st) {
         // check params for what to do here when it's ambiguous
         if (m_params.m_string_solver == "seq") {
@@ -805,6 +810,7 @@ namespace smt {
         setup_datatypes();
         setup_recfuns();
         setup_dl();
+        setup_date();
         setup_seq_str(st);
         setup_fpa();
         setup_special_relations();
@@ -838,6 +844,7 @@ namespace smt {
             setup_datatypes();
             setup_bv();
             setup_dl();
+            setup_date();
             setup_seq_str(st);
             setup_fpa();
             setup_recfuns();

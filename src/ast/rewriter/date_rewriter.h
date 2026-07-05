@@ -69,6 +69,12 @@ class date_axioms {
 
     expr* mk_int(int i) { return a.mk_int(i); }
 
+    // Inequality atoms are built in the normalized form expected by the
+    // arithmetic solvers (linear term compared against a numeral): the
+    // axioms are asserted without a rewriting pass.
+    expr* mk_le_atom(expr* x, expr* y);
+    expr* mk_lt_atom(expr* x, expr* y);
+
 public:
     date_axioms(ast_manager& m):
         m(m), dt(m), a(m) {}

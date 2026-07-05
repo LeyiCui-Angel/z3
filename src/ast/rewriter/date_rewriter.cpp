@@ -108,6 +108,23 @@ br_status date_rewriter::mk_date_cmp(decl_kind k, expr* d1, expr* d2, expr_ref& 
     return BR_FAILED;
 }
 
+expr* date_axioms::mk_le_atom(expr* x, expr* y) {
+    if (a.is_numeral(y))
+        return a.mk_le(x, y);
+    if (a.is_numeral(x))
+        return a.mk_ge(y, x);
+    return a.mk_le(a.mk_sub(x, y), mk_int(0));
+}
+
+expr* date_axioms::mk_lt_atom(expr* x, expr* y) {
+    rational r;
+    if (a.is_numeral(y, r))
+        return a.mk_le(x, a.mk_int(r - 1));
+    if (a.is_numeral(x, r))
+        return a.mk_ge(y, a.mk_int(r + 1));
+    return a.mk_le(a.mk_sub(x, y), mk_int(-1));
+}
+
 expr_ref date_axioms::mk_is_leap_year(expr* y) {
     expr* zero = mk_int(0);
     return expr_ref(m.mk_or(
@@ -125,10 +142,10 @@ expr_ref date_axioms::mk_days_in_month(expr* y, expr* mo) {
 
 expr_ref date_axioms::mk_is_valid(expr* y, expr* mo, expr* d) {
     expr_ref_vector conjs(m);
-    conjs.push_back(a.mk_le(mk_int(1), mo));
-    conjs.push_back(a.mk_le(mo, mk_int(12)));
-    conjs.push_back(a.mk_le(mk_int(1), d));
-    conjs.push_back(a.mk_le(d, mk_days_in_month(y, mo)));
+    conjs.push_back(mk_le_atom(mk_int(1), mo));
+    conjs.push_back(mk_le_atom(mo, mk_int(12)));
+    conjs.push_back(mk_le_atom(mk_int(1), d));
+    conjs.push_back(mk_le_atom(d, mk_days_in_month(y, mo)));
     return expr_ref(m.mk_and(conjs), m);
 }
 
@@ -143,7 +160,7 @@ expr_ref date_axioms::mk_rata_die(expr* y, expr* mo, expr* d) {
     expr_ref dbm(mk_int(days_before[11]), m);
     for (unsigned i = 11; i-- > 0; )
         dbm = m.mk_ite(m.mk_eq(mo, mk_int(i + 1)), mk_int(days_before[i]), dbm);
-    expr_ref leap_adj(m.mk_ite(m.mk_and(a.mk_ge(mo, mk_int(3)), mk_is_leap_year(y)),
+    expr_ref leap_adj(m.mk_ite(m.mk_and(mk_le_atom(mk_int(3), mo), mk_is_leap_year(y)),
                                mk_int(1), mk_int(0)), m);
     return expr_ref(a.mk_add(dby, a.mk_add(dbm, a.mk_add(leap_adj, d))), m);
 }
@@ -156,9 +173,9 @@ expr_ref date_axioms::mk_lex_lt(expr* d1, expr* d2, bool strict) {
     expr* y1 = dt.mk_year(d1),  * y2 = dt.mk_year(d2);
     expr* m1 = dt.mk_month(d1), * m2 = dt.mk_month(d2);
     expr* dd1 = dt.mk_day(d1),  * dd2 = dt.mk_day(d2);
-    expr* last = strict ? a.mk_lt(dd1, dd2) : a.mk_le(dd1, dd2);
-    return expr_ref(m.mk_or(a.mk_lt(y1, y2),
-                            m.mk_and(m.mk_eq(y1, y2), a.mk_lt(m1, m2)),
+    expr* last = strict ? mk_lt_atom(dd1, dd2) : mk_le_atom(dd1, dd2);
+    return expr_ref(m.mk_or(mk_lt_atom(y1, y2),
+                            m.mk_and(m.mk_eq(y1, y2), mk_lt_atom(m1, m2)),
                             m.mk_and(m.mk_eq(y1, y2), m.mk_eq(m1, m2), last)), m);
 }
 
@@ -185,9 +202,22 @@ expr_ref date_axioms::add_axiom(app* e) {
     expr* d = e->get_arg(0);
     expr* py = e->get_arg(1), * pm = e->get_arg(2), * pd = e->get_arg(3);
     if (dt.is_sub(e)) {
-        py = a.mk_uminus(py);
-        pm = a.mk_uminus(pm);
-        pd = a.mk_uminus(pd);
+        auto neg = [&](expr* p) -> expr* {
+            rational r;
+            if (a.is_numeral(p, r))
+                return a.mk_int(-r);
+            return a.mk_uminus(p);
+        };
+        py = neg(py);
+        pm = neg(pm);
+        pd = neg(pd);
+    }
+    rational rpy, rpm;
+    if (a.is_numeral(py, rpy) && rpy.is_zero() && a.is_numeral(pm, rpm) && rpm.is_zero()) {
+        // Pure day offset: month normalization and the end-of-month clamp
+        // are the identity on (calendar-valid) dates, so the result is a
+        // plain shift of the day number.
+        return expr_ref(m.mk_eq(mk_rata_die(e), a.mk_add(mk_rata_die(d), pd)), m);
     }
     // Step 1 -- month normalization.
     expr_ref t(a.mk_sub(a.mk_add(dt.mk_month(d), a.mk_add(a.mk_mul(mk_int(12), py), pm)), mk_int(1)), m);
@@ -195,7 +225,7 @@ expr_ref date_axioms::add_axiom(app* e) {
     expr_ref om(a.mk_add(a.mk_mod(t, mk_int(12)), mk_int(1)), m);
     // Step 2 -- end-of-month clamp.
     expr_ref dim(mk_days_in_month(oy, om), m);
-    expr_ref cd(m.mk_ite(a.mk_le(dt.mk_day(d), dim), dt.mk_day(d), dim), m);
+    expr_ref cd(m.mk_ite(mk_le_atom(dt.mk_day(d), dim), dt.mk_day(d), dim), m);
     // Step 3 -- day carry: shift the day number by pd.
     return expr_ref(m.mk_eq(mk_rata_die(e), a.mk_add(mk_rata_die(oy, om, cd), pd)), m);
 }
@@ -220,5 +250,5 @@ expr_ref date_axioms::bridge_axiom(expr* t, expr* u) {
     expr_ref rd_t = mk_rata_die(t), rd_u = mk_rata_die(u);
     return expr_ref(m.mk_and(
         m.mk_eq(m.mk_eq(t, u), m.mk_eq(rd_t, rd_u)),
-        m.mk_eq(mk_lex_lt(t, u, true), a.mk_lt(rd_t, rd_u))), m);
+        m.mk_eq(mk_lex_lt(t, u, true), mk_lt_atom(rd_t, rd_u))), m);
 }
