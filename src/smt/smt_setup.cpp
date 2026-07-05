@@ -35,7 +35,9 @@ Revision History:
 #include "smt/theory_seq_empty.h"
 #include "smt/theory_seq.h"
 #include "smt/theory_char.h"
+#include "smt/theory_date.h"
 #include "smt/theory_special_relations.h"
+#include "ast/for_each_expr.h"
 #include "smt/theory_sls.h"
 #include "smt/theory_pb.h"
 #include "smt/theory_fpa.h"
@@ -64,8 +66,8 @@ namespace smt {
         
         switch (cm) {
         case CFG_BASIC: setup_unknown(); break;
-        case CFG_LOGIC: setup_default(); break;
-        case CFG_AUTO:  setup_auto_config(); break;
+        case CFG_LOGIC: contains_date_exprs() ? setup_unknown() : setup_default(); break;
+        case CFG_AUTO:  contains_date_exprs() ? setup_unknown() : setup_auto_config(); break;
         }
         setup_card();
         setup_sls();
@@ -788,6 +790,40 @@ namespace smt {
         m_context.register_plugin(alloc(smt::theory_special_relations, m_context, m_manager));
     }
 
+    void setup::setup_date() {
+        m_context.register_plugin(alloc(smt::theory_date, m_context));
+    }
+
+    /**
+       \brief The date theory is not part of any standard logic. Whenever
+       date terms occur, route configuration to setup_unknown so that both
+       theory_date and the theories it reduces to are registered.
+    */
+    bool setup::contains_date_exprs() {
+        struct date_finder {
+            date_util u;
+            bool found = false;
+            date_finder(ast_manager& m): u(m) {}
+            void operator()(expr* e) {
+                if (u.is_date(e->get_sort()))
+                    found = true;
+                else if (is_app(e) && to_app(e)->get_family_id() == u.get_family_id())
+                    found = true;
+            }
+        };
+        if (!m_manager.get_plugin(m_manager.mk_family_id("date")))
+            return false;
+        ptr_vector<expr> fmls;
+        m_context.get_asserted_formulas(fmls);
+        date_finder p(m_manager);
+        for (expr* f : fmls) {
+            for_each_expr(p, f);
+            if (p.found)
+                return true;
+        }
+        return false;
+    }
+
     void setup::setup_polymorphism() {
         if (m_manager.has_type_vars())
             m_context.register_plugin(alloc(theory_polymorphism, m_context));
@@ -808,6 +844,7 @@ namespace smt {
         setup_seq_str(st);
         setup_fpa();
         setup_special_relations();
+        setup_date();
         setup_polymorphism();
         setup_relevancy(st);
     }

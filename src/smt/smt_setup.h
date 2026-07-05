@@ -102,6 +102,8 @@ namespace smt {
         void setup_seq_str(static_features const & st);
         void setup_seq();
         void setup_char();
+        void setup_date();
+        bool contains_date_exprs();
         void setup_card();
         void setup_sls();
         void setup_i_arith();
