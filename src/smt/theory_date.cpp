@@ -118,8 +118,10 @@ namespace smt {
 
     void theory_date::apply_sort_cnstr(enode * n, sort * s) {
         SASSERT(u.is_date(s));
-        if (!is_attached_to_var(n))
-            mk_var(n);
+        if (!is_attached_to_var(n)) {
+            theory_var v = mk_var(n);
+            ctx.attach_th_var(n, this, v);
+        }
         ensure_axioms(n->get_expr());
     }
 
