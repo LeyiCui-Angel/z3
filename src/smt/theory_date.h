@@ -55,7 +55,8 @@ namespace smt {
             AX_CMP,         // e1 is a comparison atom to axiomatize
             AX_EPOCH_BOUND, // e1 is a Date term whose epoch is registered with arith
             AX_INJ,         // e1, e2 are Date terms: epoch(e1) = epoch(e2) => e1 = e2
-            AX_CIVIL        // e1 is a Date term: epoch = days-from-civil(components)
+            AX_CIVIL,       // e1 is a Date term: epoch = days-from-civil(components)
+            AX_MK           // e1 is a date.mk term: definition + in-range shortcut
         };
 
         date_util       u;
@@ -76,6 +77,7 @@ namespace smt {
         void assert_epoch_bound(expr* d);
         void assert_injectivity(expr* d1, expr* d2);
         void assert_civil_identity(expr* d);
+        void assert_mk_axioms(app* mk);
 
         void ensure_var(enode* n);
         bool epoch_value(enode* n, rational& val);

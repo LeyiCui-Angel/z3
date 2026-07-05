@@ -111,10 +111,30 @@ namespace dates {
 
     void solver::internalize_date_op(app* t) {
         switch (t->get_decl_kind()) {
-        case OP_DATE_MK:
-            assert_axiom_eq(u.mk_epoch(t),
-                            u.mk_epoch_of_ymd(t->get_arg(0), t->get_arg(1), t->get_arg(2)));
+        case OP_DATE_MK: {
+            expr* y = t->get_arg(0);
+            expr* mo = t->get_arg(1);
+            expr* d = t->get_arg(2);
+            expr_ref ep(u.mk_epoch(t), m);
+            assert_axiom_eq(ep, u.mk_epoch_of_ymd(y, mo, d));
+            // constructor-selector roundtrip fast-path
+            if (u.is_year(y) && u.is_month(mo) && u.is_day(d)) {
+                expr* x = to_app(y)->get_arg(0);
+                if (x == to_app(mo)->get_arg(0) && x == to_app(d)->get_arg(0))
+                    assert_axiom_eq(ep, u.mk_epoch(x));
+            }
+            if (a.is_numeral(mo))
+                break;
+            // in-range shortcut: (1 <= m <= 12) => epoch = days-from-civil(y, m, d).
+            // subsumed by the definition, but lets the constructor-selector
+            // roundtrip close by congruence.
+            expr_ref lo(a.mk_ge(mo, a.mk_int(1)), m);
+            expr_ref hi(a.mk_le(mo, a.mk_int(12)), m);
+            expr_ref dfc = u.mk_days_from_civil(y, mo, d);
+            rewrite(dfc);
+            add_clause(~mk_literal(lo), ~mk_literal(hi), eq_internalize(ep, dfc));
             break;
+        }
         case OP_DATE_ADD: {
             expr_ref ep(u.mk_epoch(t->get_arg(0)), m);
             assert_axiom_eq(u.mk_epoch(t),
@@ -154,12 +174,14 @@ namespace dates {
         case OP_DATE_GE: {
             expr_ref ep1(u.mk_epoch(t->get_arg(0)), m);
             expr_ref ep2(u.mk_epoch(t->get_arg(1)), m);
+            // build bound-form atoms (term <= numeral): this is the normal
+            // form the arithmetic solvers expect for theory-created literals
             expr_ref ineq(m);
             switch (t->get_decl_kind()) {
-            case OP_DATE_LT: ineq = a.mk_lt(ep1, ep2); break;
-            case OP_DATE_LE: ineq = a.mk_le(ep1, ep2); break;
-            case OP_DATE_GT: ineq = a.mk_lt(ep2, ep1); break;
-            case OP_DATE_GE: ineq = a.mk_le(ep2, ep1); break;
+            case OP_DATE_LT: ineq = a.mk_le(a.mk_sub(ep1, ep2), a.mk_int(-1)); break;
+            case OP_DATE_LE: ineq = a.mk_le(a.mk_sub(ep1, ep2), a.mk_int(0)); break;
+            case OP_DATE_GT: ineq = a.mk_le(a.mk_sub(ep2, ep1), a.mk_int(-1)); break;
+            case OP_DATE_GE: ineq = a.mk_le(a.mk_sub(ep2, ep1), a.mk_int(0)); break;
             default: UNREACHABLE();
             }
             rewrite(ineq);
@@ -222,6 +244,24 @@ namespace dates {
             assert_injectivity(n1, n2);
     }
 
+    /**
+       \brief When two epoch terms merge (through congruence, unit axioms,
+       or equalities proposed by the arithmetic solver's model-based theory
+       combination), force the underlying dates to merge as well.
+    */
+    void solver::new_eq_eh(euf::th_eq const& eq) {
+        euf::enode* n1 = var2enode(eq.v1());
+        euf::enode* n2 = var2enode(eq.v2());
+        expr* e1 = n1->get_expr();
+        expr* e2 = n2->get_expr();
+        if (!u.is_epoch(e1) || !u.is_epoch(e2))
+            return;
+        euf::enode* d1 = expr2enode(to_app(e1)->get_arg(0));
+        euf::enode* d2 = expr2enode(to_app(e2)->get_arg(0));
+        if (d1 && d2 && d1->get_root() != d2->get_root())
+            assert_injectivity(d1, d2);
+    }
+
     bool solver::epoch_value(euf::enode* n, rational& val) {
         arith::arith_value av(ctx);
         for (euf::enode* sib : euf::enode_class(n->get_root())) {
@@ -237,26 +277,10 @@ namespace dates {
     }
 
     sat::check_result solver::check() {
-        force_push();
-        vector<std::pair<rational, euf::enode*>> vals;
-        for (unsigned v = 0; v < get_num_vars(); ++v) {
-            euf::enode* n = var2enode(v);
-            if (!u.is_date(n->get_expr()) || !n->is_root())
-                continue;
-            rational val(0);
-            epoch_value(n, val);
-            vals.push_back(std::make_pair(val, n));
-        }
-        std::sort(vals.begin(), vals.end(),
-                  [](auto const& p1, auto const& p2) { return p1.first < p2.first; });
-        bool ok = true;
-        for (unsigned i = 0; i + 1 < vals.size(); ++i) {
-            if (vals[i].first == vals[i + 1].first) {
-                assert_injectivity(vals[i].second, vals[i + 1].second);
-                ok = false;
-            }
-        }
-        return ok ? sat::check_result::CR_DONE : sat::check_result::CR_CONTINUE;
+        // injectivity is enforced through new_eq_eh: epoch terms are shared
+        // with the arithmetic solver, whose model-based theory combination
+        // proposes equalities between equal-valued epochs.
+        return sat::check_result::CR_DONE;
     }
 
     void solver::add_value(euf::enode* n, model& mdl, expr_ref_vector& values) {

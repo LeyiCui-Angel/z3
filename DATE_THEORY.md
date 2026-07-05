@@ -95,7 +95,9 @@ arithmetic through an internal (not user-visible) injection
 - `src/ast/rewriter/date_rewriter.{h,cpp}` — constant folding for all
   operations, normalization `date.mk` -> canonical value,
   `date.gt/ge` -> mirrored `date.lt/le`, `date.sub` -> `date.add` with
-  negated offsets. Plugged into `th_rewriter` and `model_evaluator`.
+  negated offsets, and the constructor-selector roundtrip
+  `(date.mk (date.year x) (date.month x) (date.day x))` -> `x`.
+  Plugged into `th_rewriter` and `model_evaluator`.
 - `src/smt/theory_date.{h,cpp}` — legacy SMT core solver.
 - `src/sat/smt/date_solver.{h,cpp}` — SAT/EUF core solver.
 - `src/model/date_factory.h` — value factory producing canonical date
@@ -103,7 +105,11 @@ arithmetic through an internal (not user-visible) injection
 
 Both solvers implement the same thin axiomatization:
 
-- for `t = (date.mk y m d)`: `epoch(t) = epoch-of-ymd(y, m, d)`;
+- for `t = (date.mk y m d)`: `epoch(t) = epoch-of-ymd(y, m, d)`, and for
+  non-constant months the in-range shortcut
+  `1 <= m <= 12  =>  epoch(t) = days-from-civil(y, m, d)` (month
+  normalization is the identity on that range), which lets
+  constructor/selector interactions close by congruence;
 - for `t = (date.add d py pm pd)`: `epoch(t) = epoch-of-add(epoch(d), py, pm, pd)`;
 - `date.sub` likewise with negated offsets;
 - for selectors: `(date.year d) = year-of-epoch(epoch(d))` etc., plus the
@@ -111,16 +117,23 @@ Both solvers implement the same thin axiomatization:
   epoch(d))` and the component range facts (month in [1,12], day in
   [1,31]) — valid facts that let component equalities propagate to epoch
   equalities by congruence;
-- for comparisons: `atom <=> epoch(a) < epoch(b)` (resp. `<=`);
+- for comparisons: `atom <=> epoch(a) - epoch(b) <= -1` (resp. `<= 0`) —
+  comparison literals are built directly in the bound-atom normal form
+  (`term <= numeral`) expected by the arithmetic solvers;
 - for every Date term: the tautology
   `(or (<= epoch(d) 0) (>= epoch(d) 0))`, whose only purpose is to
   register `epoch(d)` with the arithmetic solver so it always has a
   model value;
 - injectivity `epoch(a) = epoch(b) => a = b`, asserted lazily for
-  disequalities and at final check for distinct date classes whose
-  epoch values coincide in the arithmetic model (the standard
-  model-based theory combination step). The converse direction is
-  congruence of `date.epoch!` and holds automatically.
+  disequalities; the converse direction is congruence of `date.epoch!`
+  and holds automatically. In the legacy core, distinct date classes
+  whose epoch values coincide in the arithmetic assignment are detected
+  at final check (the standard model-based theory combination sweep).
+  In the SAT/EUF core, epoch terms are shared with the arithmetic
+  solver, whose own model-based combination (`assume_eqs`) proposes
+  equalities between equal-valued epochs; the date solver reacts to the
+  resulting epoch merges in `new_eq_eh` by asserting the injectivity
+  clause for the underlying dates.
 
 All right-hand sides use only linear arithmetic, `ite`, and `div`/`mod`
 by positive constants, so the reduction target is decidable. In the
@@ -142,8 +155,9 @@ SAT/EUF core instantiates the date solver on demand by family id.
 
 ## Tests
 
-`../tests/*.smt2` (relative to this directory in the task workspace)
-exercise parsing, normalization, arithmetic, comparisons, injectivity,
-congruence, models, and incremental solving; `../tests/run_tests.sh`
-runs them under both the legacy core (default) and the SAT/EUF core
-(`sat.euf=true tactic.default_tactic=sat`).
+`examples/dates/*.smt2` exercise parsing, normalization, arithmetic,
+comparisons, injectivity, congruence, models, and incremental solving;
+`examples/dates/run_tests.sh` runs them under both the legacy core
+(default) and the SAT/EUF core
+(`sat.euf=true tactic.default_tactic=sat`). All 32 runs (16 files x 2
+cores) produce the expected sat/unsat results annotated in the files.

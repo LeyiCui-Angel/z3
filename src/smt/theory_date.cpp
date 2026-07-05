@@ -79,6 +79,9 @@ namespace smt {
             case AX_CIVIL:
                 assert_civil_identity(m_e1s.get(i));
                 break;
+            case AX_MK:
+                assert_mk_axioms(to_app(m_e1s.get(i)));
+                break;
             }
         }
         return asserted;
@@ -102,12 +105,14 @@ namespace smt {
         expr* y = atom->get_arg(1);
         expr_ref ep1(u.mk_epoch(x), m);
         expr_ref ep2(u.mk_epoch(y), m);
+        // build bound-form atoms (term <= numeral): this is the normal form
+        // the arithmetic solvers expect for theory-created literals
         expr_ref ineq(m);
         switch (atom->get_decl_kind()) {
-        case OP_DATE_LT: ineq = a.mk_lt(ep1, ep2); break;
-        case OP_DATE_LE: ineq = a.mk_le(ep1, ep2); break;
-        case OP_DATE_GT: ineq = a.mk_lt(ep2, ep1); break;
-        case OP_DATE_GE: ineq = a.mk_le(ep2, ep1); break;
+        case OP_DATE_LT: ineq = a.mk_le(a.mk_sub(ep1, ep2), a.mk_int(-1)); break;
+        case OP_DATE_LE: ineq = a.mk_le(a.mk_sub(ep1, ep2), a.mk_int(0)); break;
+        case OP_DATE_GT: ineq = a.mk_le(a.mk_sub(ep2, ep1), a.mk_int(-1)); break;
+        case OP_DATE_GE: ineq = a.mk_le(a.mk_sub(ep2, ep1), a.mk_int(0)); break;
         default: UNREACHABLE();
         }
         m_rw(ineq);
@@ -188,6 +193,40 @@ namespace smt {
         }
     }
 
+    /**
+       \brief Definitional axiom for the total constructor, plus a shortcut
+       for in-range months: (1 <= m <= 12) => epoch = days-from-civil(y, m, d).
+       The shortcut is subsumed semantically by the definition (month
+       normalization is the identity on [1,12]) but lets the constructor-
+       selector roundtrip close by congruence.
+    */
+    void theory_date::assert_mk_axioms(app* mk) {
+        if (!ctx.e_internalized(mk))
+            return;
+        expr* y = mk->get_arg(0);
+        expr* mo = mk->get_arg(1);
+        expr* d = mk->get_arg(2);
+        expr_ref ep(u.mk_epoch(mk), m);
+        assert_eq_axiom(ep, u.mk_epoch_of_ymd(y, mo, d));
+        // constructor-selector roundtrip fast-path
+        if (u.is_year(y) && u.is_month(mo) && u.is_day(d)) {
+            expr* x = to_app(y)->get_arg(0);
+            if (x == to_app(mo)->get_arg(0) && x == to_app(d)->get_arg(0))
+                assert_eq_axiom(ep, u.mk_epoch(x));
+        }
+        if (a.is_numeral(mo))
+            return;
+        literal l1 = mk_literal(a.mk_ge(mo, a.mk_int(1)));
+        literal l2 = mk_literal(a.mk_le(mo, a.mk_int(12)));
+        expr_ref dfc = u.mk_days_from_civil(y, mo, d);
+        m_rw(dfc);
+        literal leq = mk_eq(ep, dfc, false);
+        ctx.mark_as_relevant(l1);
+        ctx.mark_as_relevant(l2);
+        ctx.mark_as_relevant(leq);
+        ctx.mk_th_axiom(get_id(), ~l1, ~l2, leq);
+    }
+
     // ------------------------------------------------------------------
     // internalization
 
@@ -214,8 +253,7 @@ namespace smt {
             ensure_var(e);
         switch (term->get_decl_kind()) {
         case OP_DATE_MK:
-            push_axiom(AX_EQ, u.mk_epoch(term),
-                       u.mk_epoch_of_ymd(term->get_arg(0), term->get_arg(1), term->get_arg(2)));
+            push_axiom(AX_MK, term);
             break;
         case OP_DATE_ADD: {
             expr_ref ep(u.mk_epoch(term->get_arg(0)), m);

@@ -62,6 +62,14 @@ bool date_rewriter::date_epoch_value(expr* e, rational& z) const {
 br_status date_rewriter::mk_date_mk(expr* y, expr* mo, expr* d, expr_ref& result) {
     rational ry, rmo, rd;
     arith_util& a = m_util.arith();
+    // constructor-selector roundtrip: (date.mk (date.year x) (date.month x) (date.day x)) = x
+    if (m_util.is_year(y) && m_util.is_month(mo) && m_util.is_day(d)) {
+        expr* x = to_app(y)->get_arg(0);
+        if (x == to_app(mo)->get_arg(0) && x == to_app(d)->get_arg(0)) {
+            result = x;
+            return BR_DONE;
+        }
+    }
     if (!a.is_numeral(y, ry) || !a.is_numeral(mo, rmo) || !a.is_numeral(d, rd))
         return BR_FAILED;
     rational z = date_util::epoch_of_ymd(ry, rmo, rd);

@@ -129,7 +129,6 @@ class date_util {
         civil_expr(ast_manager& mgr): y(mgr), m(mgr), d(mgr) {}
     };
     void mk_civil_of_epoch(expr* z, civil_expr& c);
-    expr_ref mk_days_from_civil(expr* y, expr* mo, expr* d);
 
 public:
     date_util(ast_manager& m):
@@ -200,6 +199,9 @@ public:
 
     // epoch of (date.mk y mo d) - the total constructor
     expr_ref mk_epoch_of_ymd(expr* y, expr* mo, expr* d);
+    // epoch of the civil triple (y, mo, d) for mo in [1,12]; agrees with
+    // mk_epoch_of_ymd on that range but skips month normalization
+    expr_ref mk_days_from_civil(expr* y, expr* mo, expr* d);
     // components of a date given by its epoch day
     expr_ref mk_year_of_epoch(expr* z);
     expr_ref mk_month_of_epoch(expr* z);

@@ -12,8 +12,12 @@ Abstract:
     Mirrors smt::theory_date: every date operation is reduced to
     integer arithmetic over the internal injection
     date.epoch! : Date -> Int, and injectivity of the epoch map
-    (epoch(a) = epoch(b) => a = b) is enforced lazily for
-    disequalities and at final check.
+    (epoch(a) = epoch(b) => a = b) is enforced lazily: eagerly for
+    disequalities, and in response to merges of epoch terms. Epoch
+    terms are shared between this solver and arithmetic, so the
+    arithmetic solver's model-based theory combination (assume_eqs)
+    proposes equalities between equal-valued epochs, which arrive
+    here through new_eq_eh.
 
 Author:
 
@@ -64,6 +68,8 @@ namespace dates {
         sat::literal internalize(expr* e, bool sign, bool root) override;
         void internalize(expr* e) override;
         void apply_sort_cnstr(euf::enode* n, sort* s) override;
+        bool is_shared(euf::theory_var v) const override { return true; }
+        void new_eq_eh(euf::th_eq const& eq) override;
         bool use_diseqs() const override { return true; }
         void new_diseq_eh(euf::th_eq const& eq) override;
         void add_value(euf::enode* n, model& mdl, expr_ref_vector& values) override;

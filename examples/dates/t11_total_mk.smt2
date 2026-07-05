@@ -1,0 +1,10 @@
+; date.mk is total over Int arguments; symbolic arguments are fine
+(declare-const y Int)
+(declare-const m Int)
+(declare-const dd Int)
+(assert (= (date.mk y m dd) (date.mk 2001 2 28)))
+(assert (> m 12))
+(assert (> dd 31))
+(check-sat)
+(get-value (y m dd))
+; EXPECT: sat (e.g. y=2000, m=13 with overflowing day)
