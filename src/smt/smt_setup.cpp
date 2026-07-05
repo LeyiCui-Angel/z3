@@ -40,6 +40,7 @@ Revision History:
 #include "smt/theory_pb.h"
 #include "smt/theory_fpa.h"
 #include "smt/theory_polymorphism.h"
+#include "smt/theory_date.h"
 
 namespace smt {
 
@@ -781,7 +782,12 @@ namespace smt {
     }
 
     void setup::setup_char() {
-        m_context.register_plugin(alloc(smt::theory_char, m_context));        
+        m_context.register_plugin(alloc(smt::theory_char, m_context));
+    }
+
+    void setup::setup_date() {
+        // arithmetic is set up by all paths that register the date theory
+        m_context.register_plugin(alloc(smt::theory_date, m_context));
     }
 
     void setup::setup_special_relations() {
@@ -808,6 +814,7 @@ namespace smt {
         setup_seq_str(st);
         setup_fpa();
         setup_special_relations();
+        setup_date();
         setup_polymorphism();
         setup_relevancy(st);
     }
@@ -833,7 +840,7 @@ namespace smt {
         if (st.m_num_quantifiers > 0) {
             if (st.m_has_real)
                 setup_AUFLIRA(false);
-            else 
+            else
                 setup_AUFLIA(false);
             setup_datatypes();
             setup_bv();
@@ -842,7 +849,14 @@ namespace smt {
             setup_fpa();
             setup_recfuns();
             setup_special_relations();
+            setup_date();
             setup_polymorphism();
+            return;
+        }
+
+        if (st.m_has_date) {
+            // date constraints reduce to integer arithmetic; use the generic setup
+            setup_unknown();
             return;
         }
 

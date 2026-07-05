@@ -33,6 +33,7 @@ static_features::static_features(ast_manager & m):
     m_lfid(m.mk_family_id("label")),
     m_arrfid(m.mk_family_id("array")),
     m_srfid(m.mk_family_id("specrels")),
+    m_datefid(m.mk_family_id("date")),
     m_label_sym("label"),
     m_pattern_sym("pattern"),
     m_expr_list_sym("expr-list") {
@@ -77,6 +78,7 @@ void static_features::reset() {
     m_has_bv                               = false;
     m_has_fpa                              = false;
     m_has_sr                               = false;
+    m_has_date                             = false;
     m_has_str                              = false;
     m_has_seq_non_str                      = false;
     m_has_arrays                           = false;
@@ -274,8 +276,12 @@ void static_features::update_core(expr * e) {
         m_has_bv = true;
     if (!m_has_fpa && (m_fpautil.is_float(e) || m_fpautil.is_rm(e)))
         m_has_fpa = true;
-    if (is_app(e) && to_app(e)->get_family_id() == m_srfid) 
+    if (is_app(e) && to_app(e)->get_family_id() == m_srfid)
         m_has_sr = true;
+    if (!m_has_date && (is_app(e) && to_app(e)->get_family_id() == m_datefid))
+        m_has_date = true;
+    if (!m_has_date && e->get_sort()->get_family_id() == m_datefid)
+        m_has_date = true;
     if (!m_has_arrays && m_arrayutil.is_array(e)) 
         check_array(e->get_sort());
     if (!m_has_ext_arrays && m_arrayutil.is_array(e) && 
@@ -381,6 +387,8 @@ void static_features::check_array(sort* s) {
 
 void static_features::update_core(sort * s) {
     mark_theory(s->get_family_id());
+    if (!m_has_date && s->get_family_id() == m_datefid)
+        m_has_date = true;
     if (!m_has_int && m_autil.is_int(s))
         m_has_int = true;
     if (!m_has_real && m_autil.is_real(s))

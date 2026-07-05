@@ -55,6 +55,7 @@ z3_add_component(smt
     theory_bv.cpp
     theory_char.cpp
     theory_datatype.cpp
+    theory_date.cpp
     theory_dense_diff_logic.cpp
     theory_diff_logic.cpp
     theory_dl.cpp
