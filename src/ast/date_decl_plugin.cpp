@@ -172,6 +172,15 @@ app* date_util::mk_add(expr* d, expr* py, expr* pm, expr* pd) {
     return m.mk_app(m_fid, OP_DATE_ADD, 4, args);
 }
 
+bool date_util::is_selector_mk(expr const* e) const {
+    expr* s0 = nullptr, * s1 = nullptr, * s2 = nullptr;
+    return is_mk(e) &&
+        is_year(to_app(e)->get_arg(0), s0) &&
+        is_month(to_app(e)->get_arg(1), s1) &&
+        is_day(to_app(e)->get_arg(2), s2) &&
+        s0 == s1 && s1 == s2;
+}
+
 bool date_util::is_numeral_mk(expr const* e, rational& y, rational& mo, rational& d) const {
     return is_mk(e) &&
         m_arith.is_numeral(to_app(e)->get_arg(0), y) &&

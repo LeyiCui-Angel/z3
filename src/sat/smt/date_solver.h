@@ -46,6 +46,7 @@ namespace date {
         expr_ref_vector m_diseq_trail;
 
         void attach_new_th_var(enode* n);
+        bool selector_enodes(euf::enode* n, euf::enode*& y, euf::enode*& mo, euf::enode*& d);
         void add_axioms(enode* n);
         void add_date_axioms(expr* t);
         void add_mk_axioms(app* t);

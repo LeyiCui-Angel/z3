@@ -107,6 +107,12 @@ namespace date {
             add_cmp_axioms(to_app(e));
             return;
         }
+        // reconstruction terms (date.mk (date.year s) ...) need no axioms of
+        // their own: the identity s = t asserted for s makes all their
+        // properties available through congruence, and a second copy of the
+        // validity constraints only burdens the arithmetic solver
+        if (u.is_selector_mk(e))
+            return;
         if (u.is_date(e))
             add_date_axioms(e);
         if (u.is_mk(e))
@@ -173,12 +179,7 @@ namespace date {
         assert_unit(a.mk_le(d, u.mk_days_in_month(y, mo)));
         // t = (date.mk (date.year t) (date.month t) (date.day t));
         // skipped when t already has this shape to ensure termination
-        expr* s0 = nullptr, * s1 = nullptr, * s2 = nullptr;
-        if (u.is_mk(t) &&
-            u.is_year(to_app(t)->get_arg(0), s0) &&
-            u.is_month(to_app(t)->get_arg(1), s1) &&
-            u.is_day(to_app(t)->get_arg(2), s2) &&
-            s0 == s1 && s1 == s2)
+        if (u.is_selector_mk(t))
             return;
         assert_unit(m.mk_eq(t, u.mk_mk(y, mo, d)));
     }
@@ -261,18 +262,29 @@ namespace date {
         assert_iff(lit, strict ? a.mk_lt(rdx, rdy) : a.mk_le(rdx, rdy));
     }
 
+    // locate internalized selector terms for some member of the class of n
+    bool solver::selector_enodes(euf::enode* n, euf::enode*& y, euf::enode*& mo, euf::enode*& d) {
+        for (euf::enode* sib : euf::enode_class(n)) {
+            expr* t = sib->get_expr();
+            y = expr2enode(u.mk_year(t));
+            mo = expr2enode(u.mk_month(t));
+            d = expr2enode(u.mk_day(t));
+            if (y && mo && d)
+                return true;
+        }
+        return false;
+    }
+
     void solver::add_value(euf::enode* n, model& mdl, expr_ref_vector& values) {
-        expr* t = n->get_expr();
         rational y, mo, d;
-        auto num_value = [&](app* sel, rational& r) {
-            euf::enode* sn = expr2enode(sel);
-            if (!sn)
-                return false;
+        euf::enode* ny = nullptr, * nmo = nullptr, * nd = nullptr;
+        auto num_value = [&](euf::enode* sn, rational& r) {
             expr* v = values.get(sn->get_root_id(), nullptr);
             return v && a.is_numeral(v, r);
         };
         expr_ref val(m);
-        if (num_value(u.mk_year(t), y) && num_value(u.mk_month(t), mo) && num_value(u.mk_day(t), d))
+        if (selector_enodes(n, ny, nmo, nd) &&
+            num_value(ny, y) && num_value(nmo, mo) && num_value(nd, d))
             val = u.mk_mk(a.mk_numeral(y, true), a.mk_numeral(mo, true), a.mk_numeral(d, true));
         else
             val = u.mk_mk(a.mk_int(1), a.mk_int(1), a.mk_int(1));
@@ -280,12 +292,9 @@ namespace date {
     }
 
     bool solver::add_dep(euf::enode* n, top_sort<euf::enode>& dep) {
-        expr* t = n->get_expr();
-        SASSERT(u.is_date(t));
-        euf::enode* y = expr2enode(u.mk_year(t));
-        euf::enode* mo = expr2enode(u.mk_month(t));
-        euf::enode* d = expr2enode(u.mk_day(t));
-        if (y && mo && d) {
+        SASSERT(u.is_date(n->get_expr()));
+        euf::enode* y = nullptr, * mo = nullptr, * d = nullptr;
+        if (selector_enodes(n, y, mo, d)) {
             dep.add(n, y);
             dep.add(n, mo);
             dep.add(n, d);

@@ -198,12 +198,7 @@ namespace smt {
         assert_axiom(a.mk_le(d, u.mk_days_in_month(y, mo)));
         // t = (date.mk (date.year t) (date.month t) (date.day t));
         // skipped when t already has this shape to ensure termination
-        expr* s0 = nullptr, * s1 = nullptr, * s2 = nullptr;
-        if (u.is_mk(t) &&
-            u.is_year(to_app(t)->get_arg(0), s0) &&
-            u.is_month(to_app(t)->get_arg(1), s1) &&
-            u.is_day(to_app(t)->get_arg(2), s2) &&
-            s0 == s1 && s1 == s2)
+        if (u.is_selector_mk(t))
             return;
         assert_axiom(m.mk_eq(t, u.mk_mk(y, mo, d)));
     }
@@ -315,6 +310,12 @@ namespace smt {
         if (is_attached_to_var(e))
             return true;
         mk_var(e);
+        // reconstruction terms (date.mk (date.year s) ...) need no axioms of
+        // their own: the identity s = t asserted for s makes all their
+        // properties available through congruence, and a second copy of the
+        // validity constraints only burdens the arithmetic solver
+        if (u.is_selector_mk(term))
+            return true;
         if (u.is_date(term))
             add_date_axioms(e);
         if (u.is_mk(term))
@@ -339,12 +340,15 @@ namespace smt {
     }
 
     model_value_proc* theory_date::mk_value(enode* n, model_generator& mg) {
-        theory_var v = n->get_th_var(get_id());
-        SASSERT(v != null_theory_var);
-        expr* t = get_enode(v)->get_expr();
-        expr_ref y(u.mk_year(t), m), mo(u.mk_month(t), m), d(u.mk_day(t), m);
-        if (ctx.e_internalized(y) && ctx.e_internalized(mo) && ctx.e_internalized(d))
-            return alloc(date_value_proc, m, ctx.get_enode(y), ctx.get_enode(mo), ctx.get_enode(d));
+        // use the selector terms of any class member that has them internalized
+        for (enode* sib : *n) {
+            expr* t = sib->get_expr();
+            if (!u.is_date(t))
+                continue;
+            expr_ref y(u.mk_year(t), m), mo(u.mk_month(t), m), d(u.mk_day(t), m);
+            if (ctx.e_internalized(y) && ctx.e_internalized(mo) && ctx.e_internalized(d))
+                return alloc(date_value_proc, m, ctx.get_enode(y), ctx.get_enode(mo), ctx.get_enode(d));
+        }
         arith_util a2(m);
         app* val = u.mk_mk(a2.mk_int(1), a2.mk_int(1), a2.mk_int(1));
         m_values_trail.push_back(val);

@@ -128,6 +128,9 @@ public:
     MATCH_UNARY(is_month);
     MATCH_UNARY(is_day);
 
+    // recognize (date.mk (date.year s) (date.month s) (date.day s)),
+    // the shape of the reconstruction identity for s
+    bool is_selector_mk(expr const* e) const;
     // recognize (date.mk n1 n2 n3) with numeral arguments
     bool is_numeral_mk(expr const* e, rational& y, rational& mo, rational& d) const;
     // recognize (date.mk n1 n2 n3) denoting a calendar-valid date
