@@ -135,6 +135,12 @@ namespace smt {
     void theory_date::add_date_term(app* term) {
         SASSERT(dt.is_date(term));
         ensure_enode(term);
+        // Keep the selector terms internalized and relevant: the model
+        // value of a Date term is reconstructed from their values.
+        for (app_ref sel : { app_ref(dt.mk_year(term), m()), app_ref(dt.mk_month(term), m()), app_ref(dt.mk_day(term), m()) }) {
+            ctx.internalize(sel, false);
+            ctx.mark_as_relevant(sel.get());
+        }
         if (m_seen.contains(term))
             return;
         m_seen.insert(term);
@@ -186,8 +192,9 @@ namespace smt {
         case OP_DATE_YEAR:
         case OP_DATE_MONTH:
         case OP_DATE_DAY:
-            if (is_app(term->get_arg(0)))
-                add_date_term(to_app(term->get_arg(0)));
+            // The Date argument is covered by apply_sort_cnstr when its
+            // enode is created; recursing here would not terminate, since
+            // add_date_term internalizes the selectors of its argument.
             break;
         default:
             break;
@@ -228,11 +235,16 @@ namespace smt {
     }
 
     model_value_proc* theory_date::mk_value(enode* n, model_generator& mg) {
-        // Locate internalized selector terms for some expression in the class.
+        // Locate internalized, relevant selector terms for some expression
+        // in the class: model construction only assigns values to relevant
+        // enodes, so dependencies must be relevant.
+        auto usable = [&](app* sel) {
+            return ctx.e_internalized(sel) && ctx.is_relevant(ctx.get_enode(sel));
+        };
         for (enode* sib : *n) {
             expr* e = sib->get_expr();
             app_ref y(dt.mk_year(e), m()), mo(dt.mk_month(e), m()), d(dt.mk_day(e), m());
-            if (ctx.e_internalized(y) && ctx.e_internalized(mo) && ctx.e_internalized(d))
+            if (usable(y) && usable(mo) && usable(d))
                 return alloc(date_value_proc, *this, ctx.get_enode(y), ctx.get_enode(mo), ctx.get_enode(d));
         }
         return alloc(expr_wrapper_proc, dt.mk_date(rational(1), rational(1), rational(1)));
