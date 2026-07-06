@@ -49,6 +49,7 @@ namespace date {
         expr_ref_vector     m_internal_pinned;
         // boolean variables of the year-range bias bound atoms
         sat::bool_var_set   m_bias_vars;
+        svector<sat::bool_var> m_bias_lit_order;
 
         euf::theory_var mk_var(euf::enode* n) override;
         void add_axiom_unit(expr* e);
@@ -67,6 +68,7 @@ namespace date {
         void asserted(sat::literal l) override {}
         sat::check_result check() override { return sat::check_result::CR_DONE; }
         bool decide(sat::bool_var& var, lbool& phase) override;
+        bool get_case_split(sat::bool_var& var, lbool& phase) override;
 
         std::ostream& display(std::ostream& out) const override;
         std::ostream& display_justification(std::ostream& out, sat::ext_justification_idx idx) const override { return out; }

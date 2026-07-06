@@ -74,13 +74,15 @@ namespace date {
             // of the two bounds is a tautology on the integers, so asserting
             // it never changes satisfiability; it merely places the bound
             // atoms in a clause so that they are decided, and the true-first
-            // phase makes the SAT engine try the [1, 9999] box before
+            // phase makes the SAT engine try the [1000, 9000] box before
             // resorting to out-of-range years.
-            sat::literal lo = mk_literal(a.mk_le(a.mk_int(1), y));
-            sat::literal hi = mk_literal(a.mk_le(y, a.mk_int(9999)));
+            sat::literal lo = mk_literal(a.mk_le(a.mk_int(1000), y));
+            sat::literal hi = mk_literal(a.mk_le(y, a.mk_int(9000)));
             add_clause(lo, hi);
             m_bias_vars.insert(lo.var());
             m_bias_vars.insert(hi.var());
+            m_bias_lit_order.push_back(lo.var());
+            m_bias_lit_order.push_back(hi.var());
         }
     }
 
@@ -393,7 +395,7 @@ namespace date {
             return;
         }
         // no constraints reached this date term; any valid date will do
-        values.set(n->get_root_id(), u.mk_date_value(rational(1), rational(1), rational(1)));
+        values.set(n->get_root_id(), u.mk_date_value(rational(1970), rational(1), rational(1)));
     }
 
     /**
@@ -407,6 +409,24 @@ namespace date {
             return false;
         phase = l_true;
         return true;
+    }
+
+    /**
+       Decide the year-range bias variables before any other variable: as the
+       topmost decisions of the search tree they can only end up false when
+       the constraints genuinely force a year outside [1000, 9000]; conflicts on
+       later decisions can never permanently flip them. This keeps model
+       years calendar-realistic whenever an in-range model exists.
+    */
+    bool solver::get_case_split(sat::bool_var& var, lbool& phase) {
+        for (auto v : m_bias_lit_order) {
+            if (s().value(v) != l_undef)
+                continue;
+            var = v;
+            phase = l_true;
+            return true;
+        }
+        return false;
     }
 
     std::ostream& solver::display(std::ostream& out) const {

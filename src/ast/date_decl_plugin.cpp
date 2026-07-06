@@ -154,7 +154,10 @@ bool date_decl_plugin::are_distinct(app* a, app* b) const {
 expr* date_decl_plugin::get_some_value(sort* s) {
     SASSERT(s == m_date);
     date_util u(*m_manager);
-    return u.mk_date_value(rational(1), rational(1), rational(1));
+    // 1970-01-01 (day number 0). A mid-range default keeps dates derived
+    // from defaulted values (via date.add/date.sub in eliminated
+    // definitions) inside a calendar-realistic year range.
+    return u.mk_date_value(rational(1970), rational(1), rational(1));
 }
 
 // ---------------------------------------------------------------------

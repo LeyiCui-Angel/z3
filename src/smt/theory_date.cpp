@@ -87,14 +87,19 @@ namespace smt {
             // bias the search toward calendar-realistic years so that weakly
             // constrained dates receive small model values. The two bounds
             // are only preferred decision literals, never asserted: if the
-            // constraints force a year outside [1, 9999] the SAT engine
+            // constraints force a year outside [1000, 9000] the SAT engine
             // simply flips them.
-            literal lo = mk_literal(a.mk_le(a.mk_int(1), y));
-            literal hi = mk_literal(a.mk_le(y, a.mk_int(9999)));
+            literal lo = mk_literal(a.mk_le(a.mk_int(1000), y));
+            literal hi = mk_literal(a.mk_le(y, a.mk_int(9000)));
             ctx.mark_as_relevant(lo);
             ctx.mark_as_relevant(hi);
             ctx.set_true_first_flag(lo.var());
             ctx.set_true_first_flag(hi.var());
+            // decide the range bounds early: as top decisions they are only
+            // flipped when the constraints genuinely force an out-of-range
+            // year, not by unrelated conflict noise
+            ctx.inc_bvar_activity(lo.var(), 1000000.0);
+            ctx.inc_bvar_activity(hi.var(), 1000000.0);
         }
         if (!u.is_mk(x))
             assert_axiom(m.mk_eq(x, u.mk_mk(y, mo, d)));
@@ -382,7 +387,7 @@ namespace smt {
                 return u.mk_date_value(y, mo, d);
             // selector values must form a valid date by the theory axioms;
             // be defensive if arithmetic left them unassigned
-            return u.mk_date_value(rational(1), rational(1), rational(1));
+            return u.mk_date_value(rational(1970), rational(1), rational(1));
         }
     };
 
@@ -400,7 +405,7 @@ namespace smt {
             return alloc(date_value_proc, u, ctx.get_enode(ye), ctx.get_enode(me), ctx.get_enode(de));
         // the axioms folded to concrete facts and left no symbolic selectors;
         // any valid date is consistent with the empty constraint set
-        return alloc(expr_wrapper_proc, u.mk_date_value(rational(1), rational(1), rational(1)));
+        return alloc(expr_wrapper_proc, u.mk_date_value(rational(1970), rational(1), rational(1)));
     }
 
     void theory_date::display(std::ostream & out) const {
