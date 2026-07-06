@@ -466,21 +466,15 @@ void date_util::mk_valid_spec(expr* y, expr* mo, expr* d, expr_ref_vector& fmls)
 }
 
 void date_util::mk_mk_spec(expr* y, expr* mo, expr* d, expr* ty, expr* tm, expr* td, expr_ref_vector& fmls) {
-    rational vy, vm, vd;
-    if (get_num(y, vy) && get_num(mo, vm) && get_num(d, vd)) {
-        if (is_valid_date(vy, vm, vd)) {
-            fmls.push_back(feq(ty, y));
-            fmls.push_back(feq(tm, mo));
-            fmls.push_back(feq(td, d));
-        }
-        // invalid concrete triple: the term is unconstrained (fresh valid date)
-        return;
-    }
-    expr_ref valid(mk_is_valid(y, mo, d), m);
-    expr_ref nvalid(m.mk_not(valid), m);
-    fmls.push_back(m.mk_or(nvalid, feq(ty, y)));
-    fmls.push_back(m.mk_or(nvalid, feq(tm, mo)));
-    fmls.push_back(m.mk_or(nvalid, feq(td, d)));
+    // date.mk is strict: the application always denotes the date given by
+    // its arguments, so the selectors equal the arguments unconditionally.
+    // Combined with the calendar validity of the selectors (mk_valid_spec,
+    // asserted for every date term), this forces the argument triple itself
+    // to be calendar-valid; a date.mk application whose arguments cannot
+    // form a valid date makes the constraints unsatisfiable.
+    fmls.push_back(feq(ty, y));
+    fmls.push_back(feq(tm, mo));
+    fmls.push_back(feq(td, d));
 }
 
 void date_util::mk_term_spec(expr* t, expr_ref_vector& fmls) {

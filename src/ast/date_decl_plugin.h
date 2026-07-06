@@ -27,8 +27,10 @@ Abstract:
 
     * date.mk applied to a calendar-valid triple (y, m, d) denotes that date;
       the selectors recover the components. date.mk is total at the SMT-LIB
-      level: applied to an invalid triple it denotes an unspecified (but
-      consistent) valid date whose components are unrelated to the arguments.
+      level (any application is well-sorted), but strict semantically: its
+      arguments are constrained to form a calendar-valid triple, so
+      constraints containing a date.mk application whose arguments cannot
+      form a valid date are unsatisfiable.
 
     * (date.add d py pm pd) follows the conventional three step algorithm:
         1. month normalization: t = month(d) + 12*py + pm - 1,
@@ -209,8 +211,9 @@ public:
     void mk_valid_spec(expr* y, expr* mo, expr* d, expr_ref_vector& fmls);
 
     // formulas linking the selectors (ty, tm, td) of a date.mk term to its
-    // arguments (y, mo, d): if the argument triple is valid the selectors
-    // agree with it, otherwise the term is unconstrained (fresh valid date)
+    // arguments (y, mo, d): the selectors equal the arguments (date.mk is
+    // strict; validity of the selectors then forces validity of the
+    // arguments)
     void mk_mk_spec(expr* y, expr* mo, expr* d, expr* ty, expr* tm, expr* td, expr_ref_vector& fmls);
 
     // all defining formulas for the date term t: calendar validity of its

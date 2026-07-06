@@ -1,5 +1,0 @@
-(set-logic ALL)
-(declare-const a Date)
-(assert (= a (date.mk 2023 2 29)))
-(assert (= (date.day a) 15))
-(check-sat)

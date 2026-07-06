@@ -1588,6 +1588,39 @@ void cmd_context::reset(bool finalize) {
     SASSERT(!m_own_manager || !has_manager());
 }
 
+// date.mk is strict: its arguments must form a calendar-valid triple.
+// The validity guards are asserted here, at the front-end, so that they
+// survive preprocessing even when the date.mk application itself is
+// simplified or eliminated (e.g. by equality substitution) before it
+// reaches a theory solver.
+void cmd_context::assert_date_mk_guards(expr * t) {
+    if (!m().get_plugin(m().mk_family_id("date")))
+        return;
+    date_util u(m());
+    struct collect_mk_proc {
+        date_util &       u;
+        ptr_vector<app> & mks;
+        collect_mk_proc(date_util& u, ptr_vector<app>& mks): u(u), mks(mks) {}
+        void operator()(var * n) {}
+        void operator()(quantifier * n) {}
+        void operator()(app * n) { if (u.is_mk(n) && n->is_ground()) mks.push_back(n); }
+    };
+    ptr_vector<app> mks;
+    collect_mk_proc proc(u, mks);
+    for_each_expr(proc, t);
+    for (app * mk : mks) {
+        expr_ref valid = u.mk_is_valid(mk->get_arg(0), mk->get_arg(1), mk->get_arg(2));
+        if (m().is_true(valid))
+            continue;
+        m().inc_ref(valid.get());
+        m_assertions.push_back(valid.get());
+        if (produce_unsat_cores())
+            m_assertion_names.push_back(nullptr);
+        if (m_solver)
+            m_solver->assert_expr(valid.get());
+    }
+}
+
 void cmd_context::assert_expr(expr * t) {
     scoped_rlimit no_limit(m().limit(), 0);
     if (!m_check_logic(t))
@@ -1599,6 +1632,7 @@ void cmd_context::assert_expr(expr * t) {
         m_assertion_names.push_back(nullptr);
     if (m_solver)
         m_solver->assert_expr(t);
+    assert_date_mk_guards(t);
 }
 
 void cmd_context::assert_expr(symbol const & name, expr * t) {
@@ -1618,6 +1652,7 @@ void cmd_context::assert_expr(symbol const & name, expr * t) {
     m_assertion_names.push_back(ans);
     if (m_solver)
         m_solver->assert_expr(t, ans);
+    assert_date_mk_guards(t);
 }
 
 void cmd_context::push() {
