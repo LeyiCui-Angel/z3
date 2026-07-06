@@ -43,7 +43,7 @@ func_decl* date_decl_plugin::mk_decl_checked(decl_kind k, char const* name, unsi
         m.raise_exception(msg.str());
     }
     for (unsigned i = 0; i < arity; ++i) {
-        sort* expected = (k == OP_DATE_MK) ? m_int :
+        sort* expected = (k == OP_DATE_MK || k == OP_DATE_MK0) ? m_int :
                          (i == 0 || k == OP_DATE_LT || k == OP_DATE_LE || k == OP_DATE_GT || k == OP_DATE_GE) ? m_date :
                          m_int;
         if (domain[i] != expected) {
@@ -62,6 +62,8 @@ func_decl* date_decl_plugin::mk_func_decl(decl_kind k, unsigned num_parameters, 
     switch (k) {
     case OP_DATE_MK:
         return mk_decl_checked(k, "date.mk", arity, domain, 3, m_date);
+    case OP_DATE_MK0:
+        return mk_decl_checked(k, "date.mk0", arity, domain, 3, m_date);
     case OP_DATE_YEAR:
         return mk_decl_checked(k, "date.year", arity, domain, 1, m_int);
     case OP_DATE_MONTH:
@@ -336,6 +338,31 @@ bool date_util::mk_constructor_axioms(app* t, expr_ref_vector& axioms) {
     return false;
 }
 
+expr_ref date_util::mk_year_bracket(expr* t, expr* d, expr* pd) {
+    ast_manager& m = m_manager;
+    arith_util& a = m_arith;
+    rational vd;
+    if (!a.is_numeral(pd, vd) || !vd.is_int())
+        return expr_ref(m.mk_true(), m);
+    // redundant bracket: a shift by vd days moves the year by at most
+    // |vd| div 365 + 1, and never against the sign of vd. This gives the
+    // arithmetic solver a direct linear link between the two year
+    // selectors, which the epoch-day towers only provide through
+    // expensive integer reasoning.
+    rational k = div(abs(vd), rational(365)) + rational(1);
+    expr_ref yt(mk_year(t), m), yd(mk_year(d), m);
+    expr_ref lo(m), hi(m);
+    if (vd.is_nonneg()) {
+        lo = a.mk_le(yd, yt);
+        hi = a.mk_le(yt, a.mk_add(yd, a.mk_int(k)));
+    }
+    else {
+        lo = a.mk_le(a.mk_sub(yd, a.mk_int(k)), yt);
+        hi = a.mk_le(yt, yd);
+    }
+    return expr_ref(m.mk_and(lo, hi), m);
+}
+
 expr_ref date_util::mk_add_axiom(app* t, bool& concrete) {
     SASSERT(is_add(t) || is_sub(t));
     concrete = false;
@@ -366,8 +393,19 @@ expr_ref date_util::mk_add_axiom(app* t, bool& concrete) {
         // pure day offset: month normalization is the identity and the
         // end-of-month clamp is absorbed by validity of d, so the result
         // is a plain shift of d's epoch day. Reusing the shared epoch term
-        // keeps the reasoning linear.
-        return expr_ref(m.mk_eq(mk_epoch_of_date(t), a.mk_add(mk_epoch_of_date(d), pd)), m);
+        // keeps the reasoning linear. Both directions of the epoch-day
+        // bijection are asserted: the epoch equation propagates constraints
+        // on the result, the civil form computes the result selectors when
+        // the base date is known (the arithmetic solver cannot invert the
+        // epoch expression by search).
+        expr_ref z(a.mk_add(mk_epoch_of_date(d), pd), m);
+        expr_ref cy(m), cm(m), cd(m);
+        mk_civil_expr(z, cy, cm, cd);
+        return expr_ref(m.mk_and(m.mk_eq(mk_epoch_of_date(t), z),
+                                 m.mk_and(m.mk_eq(mk_year(t), cy),
+                                          m.mk_eq(mk_month(t), cm),
+                                          m.mk_eq(mk_day(t), cd)),
+                                 mk_year_bracket(t, d, pd)), m);
     }
     expr_ref yd(mk_year(d), m), md(mk_month(d), m), dd(mk_day(d), m);
     // step 1 -- month normalization
@@ -376,9 +414,24 @@ expr_ref date_util::mk_add_axiom(app* t, bool& concrete) {
     expr_ref om(a.mk_add(a.mk_mod(t0, a.mk_int(12)), a.mk_int(1)), m);
     // step 2 -- end-of-month clamp
     expr_ref clamp = mk_min(dd, mk_days_in_month_expr(oy, om));
-    // step 3 -- day carry, expressed via the epoch-day bijection
-    expr_ref epoch(a.mk_add(mk_epoch_expr(oy, om, clamp), pd), m);
-    return expr_ref(m.mk_eq(mk_epoch_of_date(t), epoch), m);
+    if (a.is_numeral(pd, vd) && vd.is_zero()) {
+        // pure month/year offset: the day carry is the identity on the
+        // clamped triple, so the result selectors are available directly.
+        // This avoids the epoch-day bijection, which is much harder for
+        // the arithmetic solver to invert.
+        return expr_ref(m.mk_and(m.mk_eq(mk_year(t), oy),
+                                 m.mk_eq(mk_month(t), om),
+                                 m.mk_eq(mk_day(t), clamp)), m);
+    }
+    // step 3 -- day carry, expressed via the epoch-day bijection.
+    // As above, both directions of the bijection are asserted.
+    expr_ref z(a.mk_add(mk_epoch_expr(oy, om, clamp), pd), m);
+    expr_ref cy(m), cm(m), cd(m);
+    mk_civil_expr(z, cy, cm, cd);
+    return expr_ref(m.mk_and(m.mk_eq(mk_epoch_of_date(t), z),
+                             m.mk_and(m.mk_eq(mk_year(t), cy),
+                                      m.mk_eq(mk_month(t), cm),
+                                      m.mk_eq(mk_day(t), cd))), m);
 }
 
 expr_ref date_util::mk_compare_rhs(app* p) {

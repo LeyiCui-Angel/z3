@@ -28,6 +28,7 @@ Author:
 class date_rewriter {
     date_util m_util;
 
+    br_status mk_mk(expr* y, expr* mo, expr* d, expr_ref& result);
     br_status mk_selector(decl_kind k, expr* arg, expr_ref& result);
     br_status mk_add(expr* d, expr* py, expr* pm, expr* pd, expr_ref& result);
     br_status mk_sub(expr* d, expr* py, expr* pm, expr* pd, expr_ref& result);

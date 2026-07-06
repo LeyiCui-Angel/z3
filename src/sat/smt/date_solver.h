@@ -92,5 +92,12 @@ namespace date {
         void add_value(euf::enode* n, model& mdl, expr_ref_vector& values) override;
 
         bool add_dep(euf::enode* n, top_sort<euf::enode>& dep) override;
+
+        // date.mk0 (the unspecified-constructor fallback) is treated as an
+        // uninterpreted function; models record its interpretation so that
+        // terms mentioning it evaluate consistently
+        bool include_func_interp(func_decl* f) const override {
+            return is_decl_of(f, get_id(), OP_DATE_MK0);
+        }
     };
 }

@@ -359,6 +359,15 @@ protected:
     bool logic_has_recfun() const;
     bool logic_has_date() const;
 
+    // Symbolic date construction carries an implicit calendar-validity
+    // obligation in the SMT-LIB front-end (see Dates.smt2): every ground
+    // application of date.mk whose argument triple is not concrete is
+    // required to denote a calendar-valid Gregorian date. Collects the
+    // obligations of the date.mk applications occurring in t and asserts
+    // them alongside t.
+    void assert_date_obligations(expr * t);
+    bool m_asserting_date_obligations = false;
+
     void print_unsupported_msg() { regular_stream() << "unsupported" << std::endl; }
     void print_unsupported_info(symbol const& s, int line, int pos) { if (s != symbol::null) diagnostic_stream() << "; " << s << " line: " << line << " position: " << pos << std::endl;}
 

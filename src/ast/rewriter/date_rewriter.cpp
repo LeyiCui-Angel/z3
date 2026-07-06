@@ -20,6 +20,9 @@ br_status date_rewriter::mk_app_core(func_decl* f, unsigned num_args, expr* cons
     SASSERT(f->get_family_id() == get_fid());
     switch (f->get_decl_kind()) {
     case OP_DATE_MK:
+        SASSERT(num_args == 3);
+        return mk_mk(args[0], args[1], args[2], result);
+    case OP_DATE_MK0:
         return BR_FAILED;
     case OP_DATE_YEAR:
     case OP_DATE_MONTH:
@@ -41,6 +44,23 @@ br_status date_rewriter::mk_app_core(func_decl* f, unsigned num_args, expr* cons
     default:
         return BR_FAILED;
     }
+}
+
+br_status date_rewriter::mk_mk(expr* y, expr* mo, expr* d, expr_ref& result) {
+    rational ny, nm, nd;
+    arith_util& a = m_util.arith();
+    // A direct application of date.mk to a calendar-invalid concrete triple
+    // is unspecified: canonicalize it to the uninterpreted fallback
+    // date.mk0, whose value is an arbitrary calendar-valid date chosen by
+    // the solver and recorded in the model.
+    if (a.is_numeral(y, ny) && ny.is_int() &&
+        a.is_numeral(mo, nm) && nm.is_int() &&
+        a.is_numeral(d, nd) && nd.is_int() &&
+        !date_util::is_valid_date(ny, nm, nd)) {
+        result = m_util.mk_date0(y, mo, d);
+        return BR_DONE;
+    }
+    return BR_FAILED;
 }
 
 br_status date_rewriter::mk_selector(decl_kind k, expr* arg, expr_ref& result) {

@@ -1588,6 +1588,62 @@ void cmd_context::reset(bool finalize) {
     SASSERT(!m_own_manager || !has_manager());
 }
 
+/**
+   \brief Symbolic date construction carries an implicit calendar-validity
+   obligation in the SMT-LIB front-end (see Dates.smt2): a ground
+   application (date.mk y m d) whose arguments are not all concrete
+   integers is required to denote a calendar-valid Gregorian date. Direct
+   applications to concrete triples are exempt: for valid triples the
+   obligation is trivially true, and for invalid triples the constructor
+   value is intentionally unspecified rather than constrained.
+
+   The obligations are collected here, before any simplification, because
+   preprocessing may fold a symbolic argument triple into concrete values
+   and thereby erase the distinction the obligation is based on.
+*/
+void cmd_context::assert_date_obligations(expr * t) {
+    if (m_asserting_date_obligations)
+        return;
+    family_id date_fid = m().mk_family_id("date");
+    if (!m().get_plugin(date_fid))
+        return;
+    date_util du(m());
+    arith_util & au = du.arith();
+    expr_ref tr(t, m());
+    ptr_vector<app> mks;
+    for (expr* s : subterms::all(tr))
+        if (du.is_mk(s) && is_ground(s))
+            mks.push_back(to_app(s));
+    if (mks.empty())
+        return;
+    th_rewriter simp(m());
+    expr_ref_vector obligations(m());
+    rational r;
+    for (app* a : mks) {
+        bool concrete = true;
+        for (expr* arg : *a) {
+            expr_ref v(arg, m());
+            simp(v);
+            if (!au.is_numeral(v, r) || !r.is_int()) {
+                concrete = false;
+                break;
+            }
+        }
+        if (concrete)
+            continue;
+        expr_ref ob = du.mk_valid_expr(a->get_arg(0), a->get_arg(1), a->get_arg(2));
+        simp(ob);
+        if (m().is_true(ob))
+            continue;
+        obligations.push_back(ob);
+    }
+    if (obligations.empty())
+        return;
+    flet<bool> _guard(m_asserting_date_obligations, true);
+    for (expr* ob : obligations)
+        assert_expr(ob);
+}
+
 void cmd_context::assert_expr(expr * t) {
     scoped_rlimit no_limit(m().limit(), 0);
     if (!m_check_logic(t))
@@ -1599,6 +1655,7 @@ void cmd_context::assert_expr(expr * t) {
         m_assertion_names.push_back(nullptr);
     if (m_solver)
         m_solver->assert_expr(t);
+    assert_date_obligations(t);
 }
 
 void cmd_context::assert_expr(symbol const & name, expr * t) {
@@ -1618,6 +1675,7 @@ void cmd_context::assert_expr(symbol const & name, expr * t) {
     m_assertion_names.push_back(ans);
     if (m_solver)
         m_solver->assert_expr(t, ans);
+    assert_date_obligations(t);
 }
 
 void cmd_context::push() {

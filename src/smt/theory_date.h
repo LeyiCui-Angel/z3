@@ -87,6 +87,13 @@ namespace smt {
         void init_model(model_generator & mg) override;
 
         model_value_proc * mk_value(enode * n, model_generator & mg) override;
+
+        // date.mk0 (the unspecified-constructor fallback) is treated as an
+        // uninterpreted function; models record its interpretation so that
+        // terms mentioning it evaluate consistently
+        bool include_func_interp(func_decl* f) override {
+            return is_decl_of(f, get_family_id(), OP_DATE_MK0);
+        }
     };
 
 }

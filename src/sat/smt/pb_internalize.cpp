@@ -206,7 +206,10 @@ namespace pb {
         if (root && s().num_user_scopes() == 0) {
             if (sign) {
                 for (literal& l : lits) l.neg();
-                k2 = lits.size() + 1 - k2;
+                // the negation of at-least k is at-least (n + 1 - k) over the
+                // negated literals; guard against unsigned underflow when
+                // k > n (the negated constraint is trivially true)
+                k2 = k2 > lits.size() ? 0 : lits.size() + 1 - k2;
             }
             add_at_least(sat::null_bool_var, lits, k2);
             return sat::null_literal;
@@ -229,7 +232,10 @@ namespace pb {
         for (literal& l : lits) {
             l.neg();
         }
-        unsigned k2 = lits.size() - k.get_unsigned();
+        // at-most k over n literals is at-least (n - k) over their negations;
+        // guard against unsigned underflow when k >= n (the constraint is
+        // trivially true and k2 = 0 is handled by add_at_least)
+        unsigned k2 = k >= rational(lits.size()) ? 0 : lits.size() - k.get_unsigned();
         if (root && s().num_user_scopes() == 0) {
             if (sign) {
                 for (literal& l : lits) l.neg();
@@ -258,7 +264,9 @@ namespace pb {
         for (literal& l : lits) {
             l.neg();
         }
-        add_at_least(v2, lits, lits.size() - k.get_unsigned());
+        // guard against unsigned underflow when k > n; the at-least side
+        // above is already unsatisfiable in that case
+        add_at_least(v2, lits, k >= rational(lits.size()) ? 0 : lits.size() - k.get_unsigned());
 
         if (!root || sign) {        
             literal l1(v1, false), l2(v2, false);

@@ -34,6 +34,11 @@ enum date_sort_kind {
 
 enum date_op_kind {
     OP_DATE_MK,
+    // internal fallback constructor for calendar-invalid concrete triples.
+    // The theory leaves such applications unspecified; date.mk0 is treated
+    // as an uninterpreted function into Date so that each invalid triple
+    // denotes an arbitrary but calendar-valid date, recorded in models.
+    OP_DATE_MK0,
     OP_DATE_YEAR,
     OP_DATE_MONTH,
     OP_DATE_DAY,
@@ -76,6 +81,12 @@ public:
 
     bool is_unique_value(app* e) const override;
 
+    // date.mk0 applications denote unspecified (but calendar-valid) dates;
+    // models carry an explicit interpretation for them
+    bool is_considered_uninterpreted(func_decl* f) override {
+        return f->get_family_id() == m_family_id && f->get_decl_kind() == OP_DATE_MK0;
+    }
+
     bool are_equal(app* a, app* b) const override;
 
     bool are_distinct(app* a, app* b) const override;
@@ -113,6 +124,7 @@ public:
 
     app* mk_date(expr* y, expr* mo, expr* d) { expr* args[3] = { y, mo, d }; return m_manager.mk_app(m_fid, OP_DATE_MK, 3, args); }
     app* mk_date(rational const& y, rational const& mo, rational const& d);
+    app* mk_date0(expr* y, expr* mo, expr* d) { expr* args[3] = { y, mo, d }; return m_manager.mk_app(m_fid, OP_DATE_MK0, 3, args); }
     app* mk_year(expr* d)  { return m_manager.mk_app(m_fid, OP_DATE_YEAR, d); }
     app* mk_month(expr* d) { return m_manager.mk_app(m_fid, OP_DATE_MONTH, d); }
     app* mk_day(expr* d)   { return m_manager.mk_app(m_fid, OP_DATE_DAY, d); }
@@ -121,6 +133,7 @@ public:
     app* mk_add(expr* d, expr* py, expr* pm, expr* pd) { expr* args[4] = { d, py, pm, pd }; return m_manager.mk_app(m_fid, OP_DATE_ADD, 4, args); }
 
     bool is_mk(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_MK); }
+    bool is_mk0(expr const* e)   const { return is_app_of(e, m_fid, OP_DATE_MK0); }
     bool is_year(expr const* e)  const { return is_app_of(e, m_fid, OP_DATE_YEAR); }
     bool is_month(expr const* e) const { return is_app_of(e, m_fid, OP_DATE_MONTH); }
     bool is_day(expr const* e)   const { return is_app_of(e, m_fid, OP_DATE_DAY); }
@@ -178,6 +191,10 @@ public:
     // evaluated; such axioms are in final form and must not be simplified
     // (the date rewriter would fold them to true).
     bool mk_constructor_axioms(app* t, expr_ref_vector& axioms);
+
+    // redundant linear bracket between the year selectors of a pure
+    // day-offset result t and its base d; true when pd is not a numeral
+    expr_ref mk_year_bracket(expr* t, expr* d, expr* pd);
 
     // for a = (date.add d py pm pd) or (date.sub d py pm pd): epoch equation
     // for the result. Sets concrete (with the same meaning as for
