@@ -278,6 +278,15 @@ expr_ref date_util::mk_valid_expr(expr* y, expr* mo, expr* d) {
     return expr_ref(m.mk_and(args), m);
 }
 
+expr_ref date_util::mk_lex_cmp_expr(bool strict, expr* y1, expr* m1, expr* d1,
+                                    expr* y2, expr* m2, expr* d2) {
+    arith_util& a = m_arith;
+    // (y1, m1, d1) <[=] (y2, m2, d2) lexicographically; pure linear arithmetic
+    expr_ref day_cmp(strict ? a.mk_lt(d1, d2) : a.mk_le(d1, d2), m);
+    expr_ref mon_cmp(m.mk_or(a.mk_lt(m1, m2), m.mk_and(m.mk_eq(m1, m2), day_cmp)), m);
+    return expr_ref(m.mk_or(a.mk_lt(y1, y2), m.mk_and(m.mk_eq(y1, y2), mon_cmp)), m);
+}
+
 expr_ref date_util::mk_rata_die_expr(expr* y, expr* mo, expr* d) {
     arith_util& a = m_arith;
     // yy  = y - (mo <= 2 ? 1 : 0)

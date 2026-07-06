@@ -65,19 +65,65 @@ namespace date {
         add_axiom_unit(a.mk_le(mo, a.mk_int(12)));
         add_axiom_unit(a.mk_le(a.mk_int(1), d));
         add_axiom_unit(a.mk_le(d, u.mk_days_in_month_expr(y, mo)));
-        add_axiom_unit(m.mk_eq(u.mk_rata(x), u.mk_rata_die_expr(y, mo, d)));
         if (!u.is_mk(x))
             add_axiom_unit(m.mk_eq(x, u.mk_mk(y, mo, d)));
         rational ry, rm, rd;
-        if (getenv("DATE_NO_BIAS") == nullptr && !u.is_numeral_mk(x, ry, rm, rd)) {
+        if (!u.is_numeral_mk(x, ry, rm, rd)) {
             // bias the search toward calendar-realistic years so that weakly
-            // constrained dates receive small model values. The two bounds
-            // are only preferred decision phases, never asserted: if the
-            // constraints force a year outside [1, 9999] the SAT engine
-            // simply flips them.
-            s().set_phase(mk_literal(a.mk_le(a.mk_int(1), y)));
-            s().set_phase(mk_literal(a.mk_le(y, a.mk_int(9999))));
+            // constrained dates receive small model values. The disjunction
+            // of the two bounds is a tautology on the integers, so asserting
+            // it never changes satisfiability; it merely places the bound
+            // atoms in a clause so that they are decided, and the true-first
+            // phase makes the SAT engine try the [1, 9999] box before
+            // resorting to out-of-range years.
+            sat::literal lo = mk_literal(a.mk_le(a.mk_int(1), y));
+            sat::literal hi = mk_literal(a.mk_le(y, a.mk_int(9999)));
+            add_clause(lo, hi);
+            m_bias_vars.insert(lo.var());
+            m_bias_vars.insert(hi.var());
         }
+    }
+
+    /**
+       Define the day number of the Date term x through its selector
+       triple: date.rata(x) = rata_die(year x, month x, day x). Asserted
+       lazily, only for dates whose day number actually participates in
+       constraints (date.add/date.sub day carry); comparisons and equality
+       are handled on the selectors and never need it.
+    */
+    void solver::ensure_rata_def(expr* x) {
+        if (m_rata_defined.contains(x))
+            return;
+        m_rata_defined.insert(x);
+        m_internal_pinned.push_back(x);
+        arith_util& a = u.arith();
+        rational ry, rm, rd;
+        if (u.is_numeral_mk(x, ry, rm, rd)) {
+            if (!date_util::is_valid_date(ry, rm, rd))
+                date_util::normalize_mk(ry, rm, rd);
+            add_axiom_unit_raw(m.mk_eq(u.mk_rata(x), a.mk_int(date_util::rata_die(ry, rm, rd))));
+        }
+        else
+            add_axiom_unit(m.mk_eq(u.mk_rata(x),
+                                   u.mk_rata_die_expr(u.mk_year(x), u.mk_month(x), u.mk_day(x))));
+        // the day-number map is injective on calendar-valid dates: equal day
+        // numbers imply equal dates. Instantiated pairwise among the dates
+        // whose day number is defined, so that date equalities forced by
+        // day-number arithmetic (e.g. add/sub round trips) propagate without
+        // inverting the day-number function.
+        for (expr* w : m_rata_dates) {
+            expr_ref req(m.mk_eq(u.mk_rata(x), u.mk_rata(w)), m);
+            m_rw(req);
+            if (m.is_false(req))
+                continue;
+            sat::literal deq = eq_internalize(x, w);
+            if (m.is_true(req)) {
+                add_unit(deq);
+                continue;
+            }
+            add_clause(~mk_literal(req), deq);
+        }
+        m_rata_dates.push_back(x);
     }
 
     /**
@@ -106,7 +152,6 @@ namespace date {
             add_axiom_unit_raw(m.mk_eq(u.mk_year(t), a.mk_int(ry)));
             add_axiom_unit_raw(m.mk_eq(u.mk_month(t), a.mk_int(rm)));
             add_axiom_unit_raw(m.mk_eq(u.mk_day(t), a.mk_int(rd)));
-            add_axiom_unit_raw(m.mk_eq(u.mk_rata(t), a.mk_int(date_util::rata_die(ry, rm, rd))));
             return;
         }
         // implicit validity obligation on symbolic date.mk arguments.
@@ -153,27 +198,34 @@ namespace date {
         add_axiom_unit(m.mk_eq(u.mk_month(mkc), om));
         add_axiom_unit(m.mk_eq(u.mk_day(mkc), od));
         rational vd;
-        if (a.is_numeral(pd, vd) && vd.is_zero())
+        if (a.is_numeral(pd, vd) && vd.is_zero()) {
             // a zero day carry makes the result the clamped date itself
             add_axiom_unit(m.mk_eq(t, mkc));
+            return;
+        }
+        // day carry through the day-number bijection; requires the day
+        // numbers of the clamped date and of the result to be defined
+        ensure_rata_def(mkc);
+        ensure_rata_def(t);
         add_axiom_unit(m.mk_eq(u.mk_rata(t), a.mk_add(u.mk_rata(mkc), pd)));
     }
 
     /**
-       Comparison atoms become integer comparisons of day numbers, which
-       agree with the lexicographic order on (year, month, day) for
-       calendar-valid dates.
+       Comparison atoms are mapped to the lexicographic order on the
+       selector triples (year, month, day). The encoding is linear, so
+       comparisons never involve the day-number function.
     */
     void solver::add_cmp_axioms(sat::literal lit, app* atom) {
-        expr_ref r1(u.mk_rata(atom->get_arg(0)), m);
-        expr_ref r2(u.mk_rata(atom->get_arg(1)), m);
-        arith_util& a = u.arith();
+        expr* x1 = atom->get_arg(0);
+        expr* x2 = atom->get_arg(1);
+        app_ref y1(u.mk_year(x1), m), m1(u.mk_month(x1), m), d1(u.mk_day(x1), m);
+        app_ref y2(u.mk_year(x2), m), m2(u.mk_month(x2), m), d2(u.mk_day(x2), m);
         expr_ref cmp(m);
         switch (atom->get_decl_kind()) {
-        case OP_DATE_LT: cmp = a.mk_lt(r1, r2); break;
-        case OP_DATE_LE: cmp = a.mk_le(r1, r2); break;
-        case OP_DATE_GT: cmp = a.mk_lt(r2, r1); break;
-        case OP_DATE_GE: cmp = a.mk_le(r2, r1); break;
+        case OP_DATE_LT: cmp = u.mk_lex_cmp_expr(true, y1, m1, d1, y2, m2, d2); break;
+        case OP_DATE_LE: cmp = u.mk_lex_cmp_expr(false, y1, m1, d1, y2, m2, d2); break;
+        case OP_DATE_GT: cmp = u.mk_lex_cmp_expr(true, y2, m2, d2, y1, m1, d1); break;
+        case OP_DATE_GE: cmp = u.mk_lex_cmp_expr(false, y2, m2, d2, y1, m1, d1); break;
         default: UNREACHABLE();
         }
         m_rw(cmp);
@@ -195,26 +247,30 @@ namespace date {
     }
 
     /**
-       The day-number map is injective on calendar-valid dates: dates with
-       equal day numbers are equal. Instantiated pairwise so that equality
-       of dates follows from day-number reasoning without inverting the
-       day-number function arithmetically.
+       The selector triple determines the date: dates with equal
+       (year, month, day) are equal. Instantiated pairwise so that
+       equality of dates follows from linear selector reasoning.
     */
     void solver::add_injectivity_axioms(expr* x, euf::theory_var v) {
         for (euf::theory_var w = 0; w < v; ++w) {
             expr* xw = var2expr(w);
             if (!u.is_date(xw))
                 continue;
-            expr_ref req(m.mk_eq(u.mk_rata(x), u.mk_rata(xw)), m);
-            m_rw(req);
-            if (m.is_false(req))
+            expr_ref ey(m.mk_eq(u.mk_year(x), u.mk_year(xw)), m);
+            expr_ref em(m.mk_eq(u.mk_month(x), u.mk_month(xw)), m);
+            expr_ref ed(m.mk_eq(u.mk_day(x), u.mk_day(xw)), m);
+            m_rw(ey);
+            m_rw(em);
+            m_rw(ed);
+            if (m.is_false(ey) || m.is_false(em) || m.is_false(ed))
                 continue;
             sat::literal deq = eq_internalize(x, xw);
-            if (m.is_true(req)) {
-                add_unit(deq);
-                continue;
-            }
-            add_clause(~mk_literal(req), deq);
+            sat::literal_vector lits;
+            for (expr* e : { ey.get(), em.get(), ed.get() })
+                if (!m.is_true(e))
+                    lits.push_back(~mk_literal(e));
+            lits.push_back(deq);
+            add_clause(lits);
         }
     }
 
@@ -265,8 +321,13 @@ namespace date {
         case OP_DATE_YEAR:
         case OP_DATE_MONTH:
         case OP_DATE_DAY:
+            mk_var(expr2enode(t->get_arg(0)));
+            break;
         case OP_DATE_RATA:
             mk_var(expr2enode(t->get_arg(0)));
+            // any internalized day-number term must be defined through the
+            // selector triple of its argument
+            ensure_rata_def(t->get_arg(0));
             break;
         case OP_DATE_LT:
         case OP_DATE_LE:
@@ -333,6 +394,19 @@ namespace date {
         }
         // no constraints reached this date term; any valid date will do
         values.set(n->get_root_id(), u.mk_date_value(rational(1), rational(1), rational(1)));
+    }
+
+    /**
+       Decision-phase override for the year-range bias variables: the
+       arithmetic solver's phase heuristic evaluates bound atoms under its
+       current (often out-of-range) assignment, which would steer years away
+       from the preferred box. Answering the phase here takes precedence.
+    */
+    bool solver::decide(sat::bool_var& var, lbool& phase) {
+        if (!m_bias_vars.contains(var))
+            return false;
+        phase = l_true;
+        return true;
     }
 
     std::ostream& solver::display(std::ostream& out) const {

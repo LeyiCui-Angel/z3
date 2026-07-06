@@ -56,9 +56,19 @@ namespace smt {
         // argument validity is entailed by construction, so the implicit
         // validity obligation is not re-asserted for them
         obj_hashtable<expr> m_internal_mk;
+        // dates whose day-number definition has been asserted (lazily,
+        // only for dates involved in date.add/date.sub day carry)
+        obj_hashtable<expr> m_rata_defined;
+        // rata-defined dates in definition order, for pairwise injectivity
+        ptr_vector<expr>    m_rata_dates;
+        // scope stack: size of m_rata_dates per scope. The rata definitions
+        // are asserted as theory axioms at the current scope, so the cache
+        // must be unwound with them on pop.
+        unsigned_vector     m_rata_lim;
 
         theory_var mk_th_var(enode* n);
         void ensure_date_axioms(enode* n);
+        void ensure_rata_def(expr* x);
         // simplify e and assert it as a theory axiom; simplification keeps
         // the arithmetic solver on its linear fragment and evaluates the
         // calendar functions on concrete dates
@@ -78,6 +88,10 @@ namespace smt {
         char const * get_name() const override { return "date"; }
 
         theory * mk_fresh(context * new_ctx) override { return alloc(theory_date, *new_ctx); }
+
+        void push_scope_eh() override;
+
+        void pop_scope_eh(unsigned num_scopes) override;
 
         bool internalize_atom(app * atom, bool gate_ctx) override;
 

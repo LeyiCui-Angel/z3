@@ -82,7 +82,6 @@ namespace smt {
         assert_axiom(a.mk_le(mo, a.mk_int(12)));
         assert_axiom(a.mk_le(a.mk_int(1), d));
         assert_axiom(a.mk_le(d, u.mk_days_in_month_expr(y, mo)));
-        assert_axiom(m.mk_eq(u.mk_rata(x), u.mk_rata_die_expr(y, mo, d)));
         rational ry, rm, rd;
         if (!u.is_numeral_mk(x, ry, rm, rd)) {
             // bias the search toward calendar-realistic years so that weakly
@@ -99,17 +98,67 @@ namespace smt {
         }
         if (!u.is_mk(x))
             assert_axiom(m.mk_eq(x, u.mk_mk(y, mo, d)));
-        // the day-number map is injective on calendar-valid dates: dates
-        // with equal day numbers are equal. Instantiated pairwise so that
-        // equality of dates follows from day-number reasoning without
-        // inverting the day-number function arithmetically.
+        // the selector triple determines the date: dates with equal
+        // (year, month, day) are equal. Instantiated pairwise so that
+        // equality of dates follows from linear selector reasoning.
         for (theory_var w = 0; w < v; ++w) {
             expr* xw = get_enode(w)->get_expr();
-            expr_ref req(m.mk_eq(u.mk_rata(x), u.mk_rata(xw)), m);
+            expr_ref ey(m.mk_eq(y, year_of(w)), m);
+            expr_ref em(m.mk_eq(mo, month_of(w)), m);
+            expr_ref ed(m.mk_eq(d, day_of(w)), m);
+            m_rw(ey);
+            m_rw(em);
+            m_rw(ed);
+            if (m.is_false(ey) || m.is_false(em) || m.is_false(ed))
+                continue;
+            literal deq = mk_eq(x, xw, false);
+            ctx.mark_as_relevant(deq);
+            literal_vector lits;
+            for (expr* e : { ey.get(), em.get(), ed.get() }) {
+                if (m.is_true(e))
+                    continue;
+                literal l = mk_literal(e);
+                ctx.mark_as_relevant(l);
+                lits.push_back(~l);
+            }
+            lits.push_back(deq);
+            ctx.mk_th_axiom(get_id(), lits.size(), lits.data());
+        }
+    }
+
+    /**
+       Define the day number of the Date term x through its selector
+       triple: date.rata(x) = rata_die(year x, month x, day x). Asserted
+       lazily, only for dates whose day number actually participates in
+       constraints (date.add/date.sub day carry); comparisons and equality
+       are handled on the selectors and never need it.
+    */
+    void theory_date::ensure_rata_def(expr* x) {
+        if (m_rata_defined.contains(x))
+            return;
+        m_rata_defined.insert(x);
+        m_pinned.push_back(x);
+        arith_util& a = u.arith();
+        rational ry, rm, rd;
+        if (u.is_numeral_mk(x, ry, rm, rd)) {
+            if (!date_util::is_valid_date(ry, rm, rd))
+                date_util::normalize_mk(ry, rm, rd);
+            assert_axiom_raw(m.mk_eq(u.mk_rata(x), a.mk_int(date_util::rata_die(ry, rm, rd))));
+        }
+        else
+            assert_axiom(m.mk_eq(u.mk_rata(x),
+                                 u.mk_rata_die_expr(u.mk_year(x), u.mk_month(x), u.mk_day(x))));
+        // the day-number map is injective on calendar-valid dates: equal day
+        // numbers imply equal dates. Instantiated pairwise among the dates
+        // whose day number is defined, so that date equalities forced by
+        // day-number arithmetic (e.g. add/sub round trips) propagate without
+        // inverting the day-number function.
+        for (expr* w : m_rata_dates) {
+            expr_ref req(m.mk_eq(u.mk_rata(x), u.mk_rata(w)), m);
             m_rw(req);
             if (m.is_false(req))
                 continue;
-            literal deq = mk_eq(x, xw, false);
+            literal deq = mk_eq(x, w, false);
             ctx.mark_as_relevant(deq);
             if (m.is_true(req)) {
                 ctx.mk_th_axiom(get_id(), 1, &deq);
@@ -119,6 +168,7 @@ namespace smt {
             ctx.mark_as_relevant(leq);
             ctx.mk_th_axiom(get_id(), ~leq, deq);
         }
+        m_rata_dates.push_back(x);
     }
 
     /**
@@ -147,7 +197,6 @@ namespace smt {
             assert_axiom_raw(m.mk_eq(u.mk_year(t), a.mk_int(ry)));
             assert_axiom_raw(m.mk_eq(u.mk_month(t), a.mk_int(rm)));
             assert_axiom_raw(m.mk_eq(u.mk_day(t), a.mk_int(rd)));
-            assert_axiom_raw(m.mk_eq(u.mk_rata(t), a.mk_int(date_util::rata_die(ry, rm, rd))));
             return;
         }
         // implicit validity obligation on symbolic date.mk arguments.
@@ -200,29 +249,36 @@ namespace smt {
         assert_axiom(m.mk_eq(u.mk_month(mkc), om));
         assert_axiom(m.mk_eq(u.mk_day(mkc), od));
         rational vd;
-        if (a.is_numeral(pd, vd) && vd.is_zero())
+        if (a.is_numeral(pd, vd) && vd.is_zero()) {
             // a zero day carry makes the result the clamped date itself
             assert_axiom(m.mk_eq(t, mkc));
+            return;
+        }
+        // day carry through the day-number bijection; requires the day
+        // numbers of the clamped date and of the result to be defined
+        ensure_rata_def(mkc);
+        ensure_rata_def(t);
         assert_axiom(m.mk_eq(u.mk_rata(t), a.mk_add(u.mk_rata(mkc), pd)));
     }
 
     /**
-       Comparison atoms are mapped to integer comparisons of day numbers.
-       On calendar-valid dates the day-number order coincides with the
-       lexicographic order on (year, month, day).
+       Comparison atoms are mapped to the lexicographic order on the
+       selector triples (year, month, day). The encoding is linear, so
+       comparisons never involve the day-number function.
     */
     void theory_date::add_cmp_axioms(literal lit, app* atom) {
-        ensure_date_axioms(ctx.get_enode(atom->get_arg(0)));
-        ensure_date_axioms(ctx.get_enode(atom->get_arg(1)));
-        expr_ref r1(u.mk_rata(atom->get_arg(0)), m);
-        expr_ref r2(u.mk_rata(atom->get_arg(1)), m);
-        arith_util& a = u.arith();
+        expr* x1 = atom->get_arg(0);
+        expr* x2 = atom->get_arg(1);
+        ensure_date_axioms(ctx.get_enode(x1));
+        ensure_date_axioms(ctx.get_enode(x2));
+        app_ref y1(u.mk_year(x1), m), m1(u.mk_month(x1), m), d1(u.mk_day(x1), m);
+        app_ref y2(u.mk_year(x2), m), m2(u.mk_month(x2), m), d2(u.mk_day(x2), m);
         expr_ref cmp(m);
         switch (atom->get_decl_kind()) {
-        case OP_DATE_LT: cmp = a.mk_lt(r1, r2); break;
-        case OP_DATE_LE: cmp = a.mk_le(r1, r2); break;
-        case OP_DATE_GT: cmp = a.mk_lt(r2, r1); break;
-        case OP_DATE_GE: cmp = a.mk_le(r2, r1); break;
+        case OP_DATE_LT: cmp = u.mk_lex_cmp_expr(true, y1, m1, d1, y2, m2, d2); break;
+        case OP_DATE_LE: cmp = u.mk_lex_cmp_expr(false, y1, m1, d1, y2, m2, d2); break;
+        case OP_DATE_GT: cmp = u.mk_lex_cmp_expr(true, y2, m2, d2, y1, m1, d1); break;
+        case OP_DATE_GE: cmp = u.mk_lex_cmp_expr(false, y2, m2, d2, y1, m1, d1); break;
         default: UNREACHABLE();
         }
         m_rw(cmp);
@@ -230,6 +286,20 @@ namespace smt {
         ctx.mark_as_relevant(l);
         ctx.mk_th_axiom(get_id(), ~lit, l);
         ctx.mk_th_axiom(get_id(), lit, ~l);
+    }
+
+    void theory_date::push_scope_eh() {
+        theory::push_scope_eh();
+        m_rata_lim.push_back(m_rata_dates.size());
+    }
+
+    void theory_date::pop_scope_eh(unsigned num_scopes) {
+        unsigned old_sz = m_rata_lim[m_rata_lim.size() - num_scopes];
+        for (unsigned i = old_sz; i < m_rata_dates.size(); ++i)
+            m_rata_defined.erase(m_rata_dates[i]);
+        m_rata_dates.shrink(old_sz);
+        m_rata_lim.shrink(m_rata_lim.size() - num_scopes);
+        theory::pop_scope_eh(num_scopes);
     }
 
     bool theory_date::internalize_atom(app * atom, bool gate_ctx) {
@@ -263,8 +333,13 @@ namespace smt {
         case OP_DATE_YEAR:
         case OP_DATE_MONTH:
         case OP_DATE_DAY:
+            ensure_date_axioms(ctx.get_enode(term->get_arg(0)));
+            break;
         case OP_DATE_RATA:
             ensure_date_axioms(ctx.get_enode(term->get_arg(0)));
+            // any internalized day-number term must be defined through the
+            // selector triple of its argument
+            ensure_rata_def(term->get_arg(0));
             break;
         default:
             break;

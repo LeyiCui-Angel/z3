@@ -177,6 +177,10 @@ public:
     expr_ref mk_is_leap_expr(expr* y);
     expr_ref mk_days_in_month_expr(expr* y, expr* mo);
     expr_ref mk_valid_expr(expr* y, expr* mo, expr* d);
+    // lexicographic comparison of two selector triples; strict selects <
+    // versus <=. Linear, so comparisons never pull in div/mod reasoning.
+    expr_ref mk_lex_cmp_expr(bool strict, expr* y1, expr* m1, expr* d1,
+                             expr* y2, expr* m2, expr* d2);
     expr_ref mk_rata_die_expr(expr* y, expr* mo, expr* d);
     // steps 1 and 2 of the date.add algorithm: month normalization of
     // (y, mo) by (py, pm) followed by the end-of-month clamp of d

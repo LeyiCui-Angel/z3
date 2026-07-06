@@ -41,12 +41,20 @@ namespace date {
         // argument validity is entailed by construction, so the implicit
         // validity obligation is not re-asserted for them
         obj_hashtable<expr> m_internal_mk;
+        // dates whose day-number definition has been asserted (lazily,
+        // only for dates involved in date.add/date.sub day carry)
+        obj_hashtable<expr> m_rata_defined;
+        // rata-defined dates in definition order, for pairwise injectivity
+        ptr_vector<expr>    m_rata_dates;
         expr_ref_vector     m_internal_pinned;
+        // boolean variables of the year-range bias bound atoms
+        sat::bool_var_set   m_bias_vars;
 
         euf::theory_var mk_var(euf::enode* n) override;
         void add_axiom_unit(expr* e);
         void add_axiom_unit_raw(expr* e);
         void add_date_axioms(euf::enode* n);
+        void ensure_rata_def(expr* x);
         void add_mk_axioms(app* t);
         void add_arith_axioms(app* t);
         void add_cmp_axioms(sat::literal lit, app* atom);
@@ -58,6 +66,7 @@ namespace date {
 
         void asserted(sat::literal l) override {}
         sat::check_result check() override { return sat::check_result::CR_DONE; }
+        bool decide(sat::bool_var& var, lbool& phase) override;
 
         std::ostream& display(std::ostream& out) const override;
         std::ostream& display_justification(std::ostream& out, sat::ext_justification_idx idx) const override { return out; }
