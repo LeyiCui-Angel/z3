@@ -18,13 +18,26 @@ Abstract:
                       (with the Gregorian leap year rule for February);
     - reconstruction: d = date.mk(date.year(d), date.month(d), date.day(d))
                       (instantiated for non-constructor terms; for
-                      constructor terms it follows from the guarded
-                      selector axioms and congruence).
+                      constructor terms it follows from the selector
+                      axioms and congruence).
 
     For constructor terms (date.mk y m d):
 
-    - guarded selectors: if (y, m, d) is calendar-valid then
-                      date.year(date.mk y m d) = y, etc.
+    - implicit validity obligation: (y, m, d) is calendar-valid.
+      Per the theory specification, symbolic date construction carries
+      an implicit validity requirement on its arguments in the DateSAT
+      front-end; the theory therefore constrains the arguments of every
+      date.mk occurrence to form a calendar-valid triple.
+    - selectors: date.year(date.mk y m d) = y, etc. (unconditional;
+      sound under the validity obligation).
+
+    The validity obligation must also be enforced for date.mk
+    occurrences that are simplified away before any theory solver sees
+    them (e.g. by equality solving in preprocessing, which otherwise
+    reintroduces invalid dates through the model converter).
+    conjoin_validity_obligations augments an asserted formula with the
+    obligations of all its ground date.mk subterms; it is invoked from
+    the solver front-end (solver::assert_expr).
 
     For (date.add d py pm pd) (and date.sub with negated offsets),
     following the three-step algorithm of the theory specification:
@@ -79,9 +92,17 @@ public:
     void date_term_axioms(expr* d);
 
     /**
-       \brief Guarded selector axioms for a (date.mk y m d) term.
+       \brief Validity obligation and selector axioms for a
+       (date.mk y m d) term.
     */
     void mk_axioms(app* e);
+
+    /**
+       \brief Conjoin to f the implicit validity obligations of all
+       ground (date.mk y m d) occurrences in f. Returns f unchanged if
+       there are none.
+    */
+    static expr_ref conjoin_validity_obligations(ast_manager& m, expr* f);
 
     /**
        \brief Defining axiom for (date.add d py pm pd); handles date.sub

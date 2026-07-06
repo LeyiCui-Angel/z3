@@ -23,6 +23,7 @@ Notes:
 #include "ast/ast_pp_util.h"
 #include "ast/display_dimacs.h"
 #include "ast/converters/model_converter.h"
+#include "ast/rewriter/date_axioms.h"
 #include "solver/solver.h"
 #include "params/solver_params.hpp"
 #include "model/model_evaluator.h"
@@ -202,14 +203,19 @@ bool solver::is_literal(ast_manager& m, expr* e) {
 
 void solver::assert_expr(expr* f) {
     expr_ref fml(f, get_manager());
-    assert_expr_core(fml);    
+    // date theory: symbolic date construction carries an implicit validity
+    // obligation on the constructor arguments. It is conjoined here, before
+    // any preprocessing can eliminate the constructor occurrences.
+    fml = date_axioms::conjoin_validity_obligations(get_manager(), fml);
+    assert_expr_core(fml);
 }
 
 void solver::assert_expr(expr* f, expr* t) {
     ast_manager& m = get_manager();
-    expr_ref fml(f, m);    
+    expr_ref fml(f, m);
     expr_ref a(t, m);
-    assert_expr_core2(fml, a);    
+    fml = date_axioms::conjoin_validity_obligations(m, fml);
+    assert_expr_core2(fml, a);
 }
 
 

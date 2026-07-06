@@ -51,6 +51,9 @@ namespace smt {
             ctx.mark_as_relevant(lit);
             ls.push_back(lit);
         }
+        // all literals simplified to false: the axiom is a conflict
+        if (ls.empty())
+            ls.push_back(false_literal);
         ctx.mk_th_axiom(get_id(), ls);
     }
 
@@ -76,7 +79,7 @@ namespace smt {
             return;
         }
         // For concrete valid constructor values pin the selectors directly:
-        // the guarded selector axioms would be folded away by normalization
+        // the selector axioms would be folded away by normalization
         // without ever creating the selector terms.
         rational vy, vm, vd;
         if (u.is_date_value(e, vy, vm, vd)) {

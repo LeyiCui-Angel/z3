@@ -18,6 +18,7 @@ Author:
 #include "ast/rewriter/date_axioms.h"
 #include "ast/ast_util.h"
 #include "ast/ast_pp.h"
+#include "ast/for_each_expr.h"
 
 void date_axioms::add_clause(expr* l1, expr* l2, expr* l3) {
     expr_ref_vector lits(m);
@@ -105,7 +106,7 @@ void date_axioms::date_term_axioms(expr* d) {
     // reconstruction: d = date.mk(date.year(d), date.month(d), date.day(d)).
     // Not instantiated for constructor terms: it would create an unbounded
     // chain of nested constructor terms, and for them it already follows
-    // from the guarded selector axioms together with congruence.
+    // from the selector axioms together with congruence.
     if (!u.is_mk(d))
         add_clause(m.mk_eq(d, u.mk_mk(y, mo, dd)));
 }
@@ -115,11 +116,49 @@ void date_axioms::mk_axioms(app* e) {
     expr* y = e->get_arg(0);
     expr* mo = e->get_arg(1);
     expr* d = e->get_arg(2);
-    // the constructor is only specified on calendar-valid triples
-    expr_ref invalid(m.mk_not(mk_valid(y, mo, d)), m);
-    add_clause(invalid, m.mk_eq(u.mk_year(e), y));
-    add_clause(invalid, m.mk_eq(u.mk_month(e), mo));
-    add_clause(invalid, m.mk_eq(u.mk_day(e), d));
+    // every date.mk occurrence carries the implicit validity obligation
+    // on its arguments; under it the selector axioms are unconditional
+    add_clause(mk_valid(y, mo, d));
+    add_clause(m.mk_eq(u.mk_year(e), y));
+    add_clause(m.mk_eq(u.mk_month(e), mo));
+    add_clause(m.mk_eq(u.mk_day(e), d));
+}
+
+namespace {
+    struct date_mk_collector {
+        date_util&       u;
+        ptr_vector<app>& mks;
+        date_mk_collector(date_util& u, ptr_vector<app>& mks): u(u), mks(mks) {}
+        void operator()(app* e) { if (u.is_mk(e) && e->is_ground()) mks.push_back(e); }
+        void operator()(var* e) {}
+        void operator()(quantifier* e) {}
+    };
+}
+
+expr_ref date_axioms::conjoin_validity_obligations(ast_manager& m, expr* f) {
+    expr_ref r(f, m);
+    date_util u(m);
+    ptr_vector<app> mks;
+    date_mk_collector proc(u, mks);
+    for_each_expr(proc, f);
+    if (mks.empty())
+        return r;
+    date_axioms ax(m, [](expr_ref_vector const&) {});
+    expr_ref_vector fmls(m);
+    fmls.push_back(f);
+    rational y, mo, d;
+    for (app* e : mks) {
+        if (u.is_date_numeral(e, y, mo, d)) {
+            // concrete triples are decided directly
+            if (!date_util::is_valid_date(y, mo, d))
+                fmls.push_back(m.mk_false());
+        }
+        else
+            fmls.push_back(ax.mk_valid(e->get_arg(0), e->get_arg(1), e->get_arg(2)));
+    }
+    if (fmls.size() > 1)
+        r = m.mk_and(fmls);
+    return r;
 }
 
 void date_axioms::add_axioms(app* e) {
