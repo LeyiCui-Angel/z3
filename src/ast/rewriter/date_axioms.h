@@ -64,6 +64,7 @@ namespace dates {
         void add_iff(expr* atom, expr* def) { m_add_iff(atom, def); }
 
         void validity_axiom(expr* t);
+        void epoch_roundtrip_axiom(expr* t);
         void reconstruction_axiom(expr* t);
         void constructor_axioms(app* t);
         void add_op_axioms(app* t, bool subtract);
@@ -100,6 +101,10 @@ namespace dates {
 
         // emit defining axioms for a comparison atom date.lt/le/gt/ge
         void compare_axioms(app* atom);
+
+        // dates are determined by their selector triple: t1 != t2 implies
+        // some selector differs. Instantiated on disequalities.
+        void diseq_axiom(expr* t1, expr* t2);
 
         // (or (and (= (mod y 4) 0) (not (= (mod y 100) 0))) (= (mod y 400) 0))
         expr_ref mk_is_leap(expr* y);

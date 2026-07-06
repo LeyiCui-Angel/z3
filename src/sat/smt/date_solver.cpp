@@ -149,18 +149,30 @@ namespace dates {
         track(n);
     }
 
+    void solver::new_diseq_eh(euf::th_eq const& eq) {
+        ctx.push(push_back_trail(m_diseqs));
+        m_diseqs.push_back({eq.v1(), eq.v2()});
+    }
+
     // Instantiating axioms internalizes new terms, which can grow the
-    // queue while it is drained; the loop condition re-reads the size.
+    // queues while they are drained; the loop conditions re-read the sizes.
     bool solver::flush_axioms() {
-        if (m_qhead >= m_queue.size())
+        if (m_qhead >= m_queue.size() && m_dhead >= m_diseqs.size())
             return false;
-        ctx.push(value_trail<unsigned>(m_qhead));
-        while (m_qhead < m_queue.size()) {
-            expr* e = m_queue[m_qhead++];
-            if (dt.is_comparison(e))
-                m_ax.compare_axioms(to_app(e));
-            else
-                m_ax.term_axioms(e);
+        while (m_qhead < m_queue.size() || m_dhead < m_diseqs.size()) {
+            if (m_qhead < m_queue.size()) {
+                ctx.push(value_trail<unsigned>(m_qhead));
+                expr* e = m_queue[m_qhead++];
+                if (dt.is_comparison(e))
+                    m_ax.compare_axioms(to_app(e));
+                else
+                    m_ax.term_axioms(e);
+            }
+            else {
+                ctx.push(value_trail<unsigned>(m_dhead));
+                auto [v1, v2] = m_diseqs[m_dhead++];
+                m_ax.diseq_axiom(var2expr(v1), var2expr(v2));
+            }
         }
         return true;
     }

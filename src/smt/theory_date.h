@@ -37,8 +37,10 @@ namespace smt {
         th_rewriter      m_rw;
         ptr_vector<expr> m_terms;       // Date terms whose axioms are pending
         ptr_vector<app>  m_atoms;       // comparison atoms whose axioms are pending
+        svector<std::pair<theory_var, theory_var>> m_diseqs; // disequalities whose axioms are pending
         unsigned         m_terms_qhead = 0;
         unsigned         m_atoms_qhead = 0;
+        unsigned         m_diseqs_qhead = 0;
 
         void assert_axiom(expr* e);
         void assert_eq(expr* a, expr* b);
@@ -54,7 +56,7 @@ namespace smt {
         bool internalize_term(app * term) override;
         void apply_sort_cnstr(enode * n, sort * s) override;
         void new_eq_eh(theory_var v1, theory_var v2) override {}
-        void new_diseq_eh(theory_var v1, theory_var v2) override {}
+        void new_diseq_eh(theory_var v1, theory_var v2) override;
         bool can_propagate() override;
         void propagate() override;
         final_check_status final_check_eh(unsigned level) override;

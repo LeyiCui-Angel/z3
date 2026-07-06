@@ -126,6 +126,22 @@ namespace dates {
         add_axiom(valid);
     }
 
+    // roundtrip through the epoch bijection: the selector triple of t is
+    // the calendar decomposition of its own epoch day. This lets the
+    // solver collapse equal epochs to equal dates (injectivity of
+    // days_from_civil) through congruence, instead of re-deriving the
+    // inverse decomposition inside linear arithmetic. Emitted for the
+    // dates involved in date.add/date.sub, whose axioms relate dates
+    // through their epochs.
+    void axioms::epoch_roundtrip_axiom(expr* t) {
+        expr_ref y(dt.mk_year(t), m), mo(dt.mk_month(t), m), d(dt.mk_day(t), m);
+        expr_ref ry(m), rm(m), rd(m);
+        mk_civil_from_days(mk_epoch(t), ry, rm, rd);
+        add_eq(y, ry);
+        add_eq(mo, rm);
+        add_eq(d, rd);
+    }
+
     void axioms::reconstruction_axiom(expr* t) {
         expr_ref rebuilt(dt.mk_mk(dt.mk_year(t), dt.mk_month(t), dt.mk_day(t)), m);
         add_eq(t, rebuilt);
@@ -182,6 +198,11 @@ namespace dates {
         }
         expr_ref y(dt.mk_year(d), m), mo(dt.mk_month(d), m), dd(dt.mk_day(d), m);
 
+        // the operation relates t and d through their epoch days; anchor
+        // the argument's selectors to the epoch bijection so equal epochs
+        // collapse to equal dates
+        epoch_roundtrip_axiom(d);
+
         rational rpy, rpm, rpd;
         bool zero_months =
             a.is_numeral(py, rpy) && a.is_numeral(pm, rpm) &&
@@ -235,6 +256,14 @@ namespace dates {
             add_op_axioms(to_app(t), false);
         else if (dt.is_sub(t))
             add_op_axioms(to_app(t), true);
+    }
+
+    void axioms::diseq_axiom(expr* t1, expr* t2) {
+        expr_ref eq(m.mk_eq(t1, t2), m);
+        expr_ref sel_eq(m.mk_and(m.mk_eq(dt.mk_year(t1), dt.mk_year(t2)),
+                                 m.mk_eq(dt.mk_month(t1), dt.mk_month(t2)),
+                                 m.mk_eq(dt.mk_day(t1), dt.mk_day(t2))), m);
+        add_axiom(m.mk_implies(sel_eq, eq));
     }
 
     void axioms::compare_axioms(app* atom) {

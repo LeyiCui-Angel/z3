@@ -131,8 +131,14 @@ namespace smt {
         add_date_term(n);
     }
 
+    void theory_date::new_diseq_eh(theory_var v1, theory_var v2) {
+        ctx.push_trail(push_back_vector(m_diseqs));
+        m_diseqs.push_back({v1, v2});
+    }
+
     bool theory_date::can_propagate() {
-        return m_terms_qhead < m_terms.size() || m_atoms_qhead < m_atoms.size();
+        return m_terms_qhead < m_terms.size() || m_atoms_qhead < m_atoms.size() ||
+               m_diseqs_qhead < m_diseqs.size();
     }
 
     void theory_date::propagate() {
@@ -150,10 +156,15 @@ namespace smt {
                 expr* t = m_terms[m_terms_qhead++];
                 m_ax.term_axioms(t);
             }
-            else {
+            else if (m_atoms_qhead < m_atoms.size()) {
                 ctx.push_trail(value_trail<unsigned>(m_atoms_qhead));
                 app* p = m_atoms[m_atoms_qhead++];
                 m_ax.compare_axioms(p);
+            }
+            else {
+                ctx.push_trail(value_trail<unsigned>(m_diseqs_qhead));
+                auto [v1, v2] = m_diseqs[m_diseqs_qhead++];
+                m_ax.diseq_axiom(get_enode(v1)->get_expr(), get_enode(v2)->get_expr());
             }
         }
         return advanced;

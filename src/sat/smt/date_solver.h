@@ -35,7 +35,9 @@ namespace dates {
         dates::axioms    m_ax;
         th_rewriter      m_rw;
         ptr_vector<expr> m_queue;       // terms and atoms whose axioms are pending
+        svector<std::pair<euf::theory_var, euf::theory_var>> m_diseqs; // disequalities whose axioms are pending
         unsigned         m_qhead = 0;
+        unsigned         m_dhead = 0;
 
         void assert_axiom(expr* e);
         void assert_eq(expr* a, expr* b);
@@ -57,7 +59,7 @@ namespace dates {
 
         void asserted(sat::literal l) override {}
         void new_eq_eh(euf::th_eq const& eq) override {}
-        void new_diseq_eh(euf::th_eq const& eq) override {}
+        void new_diseq_eh(euf::th_eq const& eq) override;
 
         bool unit_propagate() override;
         sat::check_result check() override;
