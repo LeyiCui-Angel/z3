@@ -218,6 +218,15 @@ namespace dates {
             epoch = a.mk_add(mk_epoch(d), pd);
             if (a.is_numeral(pd, rpd) && rpd.is_zero())
                 add_eq(t, d);
+            else if (!dt.is_add(d) && !dt.is_sub(d)) {
+                // a pure day shift is a bijection with an exact inverse:
+                // d = t shifted back by pd. The inverse term lets
+                // congruence collapse equal shifted dates to equal bases
+                // directly. Only emitted when the argument is not itself
+                // an add/sub application, so inverse terms do not recurse.
+                expr_ref inv(dt.mk_add(t, mk_neg(py), mk_neg(pm), mk_neg(pd)), m);
+                add_eq(d, inv);
+            }
         }
         else {
             // step 1 -- month normalization
