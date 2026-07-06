@@ -29,7 +29,8 @@ namespace date {
     solver::solver(euf::solver& ctx, euf::theory_id id) :
         th_euf_solver(ctx, ctx.get_manager().get_family_name(id), id),
         u(ctx.get_manager()),
-        m_rw(ctx.get_manager(), date_rewriter_params()) {
+        m_rw(ctx.get_manager(), date_rewriter_params()),
+        m_internal_pinned(ctx.get_manager()) {
     }
 
     euf::th_solver* solver::clone(euf::solver& ctx) {
@@ -67,12 +68,27 @@ namespace date {
         add_axiom_unit(m.mk_eq(u.mk_rata(x), u.mk_rata_die_expr(y, mo, d)));
         if (!u.is_mk(x))
             add_axiom_unit(m.mk_eq(x, u.mk_mk(y, mo, d)));
+        rational ry, rm, rd;
+        if (getenv("DATE_NO_BIAS") == nullptr && !u.is_numeral_mk(x, ry, rm, rd)) {
+            // bias the search toward calendar-realistic years so that weakly
+            // constrained dates receive small model values. The two bounds
+            // are only preferred decision phases, never asserted: if the
+            // constraints force a year outside [1, 9999] the SAT engine
+            // simply flips them.
+            s().set_phase(mk_literal(a.mk_le(a.mk_int(1), y)));
+            s().set_phase(mk_literal(a.mk_le(y, a.mk_int(9999))));
+        }
     }
 
     /**
-       For t = (date.mk y m d) assert the selector equations guarded by
-       calendar validity of the argument triple; invalid constructor
-       applications denote an unspecified valid date.
+       For t = (date.mk y m d):
+       - numeral triples denote a concrete date: invalid triples fold to the
+         fixed total interpretation (date_util::normalize_mk), matching the
+         rewriter, and the selector equations are asserted unconditionally;
+       - symbolic constructor applications carry the implicit validity
+         obligation of the theory: valid(y, m, d) is asserted together with
+         the (now unconditional) selector equations. A symbolic date.mk with
+         arguments that cannot form a calendar-valid date is unsatisfiable.
     */
     void solver::add_mk_axioms(app* t) {
         expr* y = t->get_arg(0);
@@ -80,7 +96,10 @@ namespace date {
         expr* d = t->get_arg(2);
         arith_util& a = u.arith();
         rational ry, rm, rd;
-        if (u.is_value_mk(t, ry, rm, rd)) {
+        if (u.is_numeral_mk(t, ry, rm, rd)) {
+            if (!date_util::is_valid_date(ry, rm, rd))
+                // direct invalid application: fixed total interpretation
+                date_util::normalize_mk(ry, rm, rd);
             // keep the selector terms of concrete dates in the e-graph
             // (unsimplified) so that congruence links them to the selectors
             // of terms the date is equated with
@@ -90,26 +109,15 @@ namespace date {
             add_axiom_unit_raw(m.mk_eq(u.mk_rata(t), a.mk_int(date_util::rata_die(ry, rm, rd))));
             return;
         }
-        expr_ref valid(u.mk_valid_expr(y, mo, d), m);
-        m_rw(valid);
-        if (m.is_false(valid))
-            return;
-        expr_ref ye(m.mk_eq(u.mk_year(t), y), m);
-        expr_ref me(m.mk_eq(u.mk_month(t), mo), m);
-        expr_ref de(m.mk_eq(u.mk_day(t), d), m);
-        m_rw(ye);
-        m_rw(me);
-        m_rw(de);
-        if (m.is_true(valid)) {
-            add_axiom_unit(ye);
-            add_axiom_unit(me);
-            add_axiom_unit(de);
-            return;
-        }
-        sat::literal lv = mk_literal(valid);
-        for (expr* e : { ye.get(), me.get(), de.get() })
-            if (!m.is_true(e))
-                add_clause(~lv, mk_literal(e));
+        // implicit validity obligation on symbolic date.mk arguments.
+        // Internal constructor terms (add_arith_axioms) are exempt: their
+        // arguments are calendar-valid by construction and the obligation
+        // would only burden the arithmetic solver with redundant constraints.
+        if (!m_internal_mk.contains(t))
+            add_axiom_unit(u.mk_valid_expr(y, mo, d));
+        add_axiom_unit(m.mk_eq(u.mk_year(t), y));
+        add_axiom_unit(m.mk_eq(u.mk_month(t), mo));
+        add_axiom_unit(m.mk_eq(u.mk_day(t), d));
     }
 
     /**
@@ -137,6 +145,10 @@ namespace date {
         m_rw(om);
         m_rw(od);
         app_ref mkc(u.mk_mk(oy, om, od), m);
+        if (!m_internal_mk.contains(mkc)) {
+            m_internal_mk.insert(mkc);
+            m_internal_pinned.push_back(mkc);
+        }
         add_axiom_unit(m.mk_eq(u.mk_year(mkc), oy));
         add_axiom_unit(m.mk_eq(u.mk_month(mkc), om));
         add_axiom_unit(m.mk_eq(u.mk_day(mkc), od));

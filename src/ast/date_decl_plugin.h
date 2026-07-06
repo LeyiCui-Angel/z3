@@ -157,6 +157,13 @@ public:
     // inverse of rata_die (civil_from_days)
     static void date_of_rata_die(rational const& rd, rational& y, rational& mo, rational& d);
 
+    // fixed total interpretation of date.mk on numeral triples: normalizes
+    // any integer triple to a calendar-valid date (identity on valid input).
+    // Refines the intentionally unspecified behavior of invalid direct
+    // constructor applications deterministically, so that rewriter, theory
+    // solvers and model evaluation agree on one value.
+    static void normalize_mk(rational& y, rational& mo, rational& d);
+
     // the date.add algorithm on a valid concrete date:
     // month normalization, end-of-month clamp, day carry
     static void add_period(rational const& y, rational const& mo, rational const& d,

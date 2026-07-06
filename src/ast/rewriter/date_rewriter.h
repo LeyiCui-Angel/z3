@@ -13,8 +13,9 @@ Abstract:
     - date.gt/date.ge are normalized to date.lt/date.le with swapped arguments.
     - Selectors, arithmetic and comparisons over concrete calendar-valid
       dates are evaluated. Applications of date.mk to invalid concrete
-      triples are deliberately left untouched: their value is unspecified
-      and is determined by the theory solver like any other symbolic date.
+      triples fold to the fixed total interpretation (date_util::normalize_mk),
+      refining their intentionally unspecified value deterministically so that
+      simplification, theory solvers and model evaluation agree.
 
 Author:
 
@@ -33,6 +34,8 @@ Author:
 class date_rewriter {
     ast_manager& m;
     date_util    m_util;
+
+    br_status mk_date_mk(expr* y, expr* mo, expr* d, expr_ref& result);
 
     br_status mk_date_selector(decl_kind k, expr* a, expr_ref& result);
 

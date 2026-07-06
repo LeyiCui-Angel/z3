@@ -52,6 +52,10 @@ namespace smt {
         ptr_vector<app>  m_month;
         ptr_vector<app>  m_day;
         expr_ref_vector  m_pinned;
+        // date.mk terms created internally by add_arith_axioms; their
+        // argument validity is entailed by construction, so the implicit
+        // validity obligation is not re-asserted for them
+        obj_hashtable<expr> m_internal_mk;
 
         theory_var mk_th_var(enode* n);
         void ensure_date_axioms(enode* n);

@@ -20,7 +20,8 @@ br_status date_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * co
     SASSERT(f->get_family_id() == get_fid());
     switch (f->get_decl_kind()) {
     case OP_DATE_MK:
-        return BR_FAILED;
+        SASSERT(num_args == 3);
+        return mk_date_mk(args[0], args[1], args[2], result);
     case OP_DATE_YEAR:
     case OP_DATE_MONTH:
     case OP_DATE_DAY:
@@ -42,6 +43,22 @@ br_status date_rewriter::mk_app_core(func_decl * f, unsigned num_args, expr * co
     default:
         return BR_FAILED;
     }
+}
+
+br_status date_rewriter::mk_date_mk(expr* y, expr* mo, expr* d, expr_ref& result) {
+    arith_util& a = m_util.arith();
+    rational ry, rm, rd;
+    if (!a.is_numeral(y, ry) || !ry.is_int() ||
+        !a.is_numeral(mo, rm) || !rm.is_int() ||
+        !a.is_numeral(d, rd) || !rd.is_int())
+        return BR_FAILED;
+    if (date_util::is_valid_date(ry, rm, rd))
+        return BR_FAILED; // already a canonical value
+    // direct constructor application on an invalid triple: fold to the fixed
+    // total interpretation so every concrete date.mk denotes a valid date
+    date_util::normalize_mk(ry, rm, rd);
+    result = m_util.mk_date_value(ry, rm, rd);
+    return BR_DONE;
 }
 
 br_status date_rewriter::mk_date_selector(decl_kind k, expr* a, expr_ref& result) {

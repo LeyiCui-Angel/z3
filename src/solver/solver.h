@@ -117,6 +117,13 @@ public:
 
     virtual void assert_expr_core(expr * t) = 0;
 
+private:
+    // materialize the implicit validity obligations of symbolic date.mk
+    // subterms of f as explicit assertions (see solver.cpp)
+    void assert_date_mk_obligations(expr* f);
+
+public:
+
     void assert_expr(expr_ref_vector const& ts) { 
         for (expr* e : ts) assert_expr(e);
     }

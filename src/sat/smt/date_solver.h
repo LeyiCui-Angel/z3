@@ -37,6 +37,11 @@ namespace date {
     class solver : public euf::th_euf_solver {
         date_util   u;
         th_rewriter m_rw;
+        // date.mk terms created internally by add_arith_axioms; their
+        // argument validity is entailed by construction, so the implicit
+        // validity obligation is not re-asserted for them
+        obj_hashtable<expr> m_internal_mk;
+        expr_ref_vector     m_internal_pinned;
 
         euf::theory_var mk_var(euf::enode* n) override;
         void add_axiom_unit(expr* e);

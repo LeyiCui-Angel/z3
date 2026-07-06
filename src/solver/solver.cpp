@@ -22,6 +22,8 @@ Notes:
 #include "ast/ast_pp.h"
 #include "ast/ast_pp_util.h"
 #include "ast/display_dimacs.h"
+#include "ast/date_decl_plugin.h"
+#include "ast/for_each_expr.h"
 #include "ast/converters/model_converter.h"
 #include "solver/solver.h"
 #include "params/solver_params.hpp"
@@ -200,16 +202,58 @@ bool solver::is_literal(ast_manager& m, expr* e) {
     return is_m_atom(m, e) || (m.is_not(e, e) && is_m_atom(m, e));
 }
 
+namespace {
+    // collect ground date.mk applications with at least one non-numeral
+    // argument: these carry the implicit validity obligation of the date
+    // theory (Dates.smt2)
+    struct date_mk_obligation_proc {
+        date_util&       u;
+        ptr_vector<app>& m_mks;
+        date_mk_obligation_proc(date_util& u, ptr_vector<app>& mks): u(u), m_mks(mks) {}
+        void operator()(var*) {}
+        void operator()(quantifier*) {}
+        void operator()(app* t) {
+            rational y, mo, d;
+            if (u.is_mk(t) && is_ground(t) && !u.is_numeral_mk(t, y, mo, d))
+                m_mks.push_back(t);
+        }
+    };
+}
+
+/**
+   The date theory gives symbolic date.mk applications an implicit validity
+   obligation on their (year, month, day) arguments. The theory solvers
+   assert it for every internalized date.mk term, but preprocessing (e.g.
+   solve-eqs) may eliminate a term before it ever reaches a theory solver,
+   silently dropping the obligation. Materialize the obligations as explicit
+   assertions at the solver interface, before any preprocessing runs.
+*/
+void solver::assert_date_mk_obligations(expr* f) {
+    if (!is_app(f) && !is_quantifier(f))
+        return;
+    ast_manager& m = get_manager();
+    date_util u(m);
+    ptr_vector<app> mks;
+    date_mk_obligation_proc proc(u, mks);
+    for_each_expr(proc, f);
+    for (app* t : mks) {
+        expr_ref valid(u.mk_valid_expr(t->get_arg(0), t->get_arg(1), t->get_arg(2)), m);
+        assert_expr_core(valid);
+    }
+}
+
 void solver::assert_expr(expr* f) {
     expr_ref fml(f, get_manager());
-    assert_expr_core(fml);    
+    assert_date_mk_obligations(fml);
+    assert_expr_core(fml);
 }
 
 void solver::assert_expr(expr* f, expr* t) {
     ast_manager& m = get_manager();
-    expr_ref fml(f, m);    
+    expr_ref fml(f, m);
     expr_ref a(t, m);
-    assert_expr_core2(fml, a);    
+    assert_date_mk_obligations(fml);
+    assert_expr_core2(fml, a);
 }
 
 

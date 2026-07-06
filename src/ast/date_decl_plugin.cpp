@@ -222,6 +222,21 @@ void date_util::date_of_rata_die(rational const& rd, rational& y, rational& mo, 
     SASSERT(rata_die(y, mo, d) == rd);
 }
 
+void date_util::normalize_mk(rational& y, rational& mo, rational& d) {
+    // fixed total interpretation of date.mk on invalid triples: carry
+    // out-of-range months into years, then carry out-of-range days through
+    // the day-number bijection. The identity on calendar-valid triples.
+    rational t  = mo - rational(1);
+    rational oy = y + div(t, rational(12));
+    rational om = mod(t, rational(12)) + rational(1);
+    if (rational(1) <= d && d <= days_in_month(oy, om)) {
+        y = oy;
+        mo = om;
+        return;
+    }
+    date_of_rata_die(rata_die(oy, om, rational(1)) + d - rational(1), y, mo, d);
+}
+
 void date_util::add_period(rational const& y, rational const& mo, rational const& d,
                            rational const& py, rational const& pm, rational const& pd,
                            rational& ry, rational& rm, rational& rd) {

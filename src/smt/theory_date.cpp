@@ -83,6 +83,20 @@ namespace smt {
         assert_axiom(a.mk_le(a.mk_int(1), d));
         assert_axiom(a.mk_le(d, u.mk_days_in_month_expr(y, mo)));
         assert_axiom(m.mk_eq(u.mk_rata(x), u.mk_rata_die_expr(y, mo, d)));
+        rational ry, rm, rd;
+        if (!u.is_numeral_mk(x, ry, rm, rd)) {
+            // bias the search toward calendar-realistic years so that weakly
+            // constrained dates receive small model values. The two bounds
+            // are only preferred decision literals, never asserted: if the
+            // constraints force a year outside [1, 9999] the SAT engine
+            // simply flips them.
+            literal lo = mk_literal(a.mk_le(a.mk_int(1), y));
+            literal hi = mk_literal(a.mk_le(y, a.mk_int(9999)));
+            ctx.mark_as_relevant(lo);
+            ctx.mark_as_relevant(hi);
+            ctx.set_true_first_flag(lo.var());
+            ctx.set_true_first_flag(hi.var());
+        }
         if (!u.is_mk(x))
             assert_axiom(m.mk_eq(x, u.mk_mk(y, mo, d)));
         // the day-number map is injective on calendar-valid dates: dates
@@ -108,11 +122,14 @@ namespace smt {
     }
 
     /**
-       For t = (date.mk y m d) assert the selector equations guarded by
-       calendar validity of (y, m, d):
-           valid(y, m, d) => date.year(t) = y, date.month(t) = m, date.day(t) = d
-       For invalid triples the selectors are unconstrained apart from the
-       validity axioms, i.e. t denotes an unspecified valid date.
+       For t = (date.mk y m d):
+       - numeral triples denote a concrete date: invalid triples fold to the
+         fixed total interpretation (date_util::normalize_mk), matching the
+         rewriter, and the selector equations are asserted unconditionally;
+       - symbolic constructor applications carry the implicit validity
+         obligation of the theory: valid(y, m, d) is asserted together with
+         the (now unconditional) selector equations. A symbolic date.mk with
+         arguments that cannot form a calendar-valid date is unsatisfiable.
     */
     void theory_date::add_mk_axioms(app* t) {
         expr* y = t->get_arg(0);
@@ -120,7 +137,10 @@ namespace smt {
         expr* d = t->get_arg(2);
         arith_util& a = u.arith();
         rational ry, rm, rd;
-        if (u.is_value_mk(t, ry, rm, rd)) {
+        if (u.is_numeral_mk(t, ry, rm, rd)) {
+            if (!date_util::is_valid_date(ry, rm, rd))
+                // direct invalid application: fixed total interpretation
+                date_util::normalize_mk(ry, rm, rd);
             // keep the selector terms of concrete dates in the e-graph
             // (unsimplified) so that congruence links them to the selectors
             // of terms the date is equated with
@@ -130,33 +150,15 @@ namespace smt {
             assert_axiom_raw(m.mk_eq(u.mk_rata(t), a.mk_int(date_util::rata_die(ry, rm, rd))));
             return;
         }
-        expr_ref valid(u.mk_valid_expr(y, mo, d), m);
-        m_rw(valid);
-        if (m.is_false(valid))
-            // invalid constructor application: the selectors are only
-            // constrained by the validity axioms
-            return;
-        expr_ref ye(m.mk_eq(u.mk_year(t), y), m);
-        expr_ref me(m.mk_eq(u.mk_month(t), mo), m);
-        expr_ref de(m.mk_eq(u.mk_day(t), d), m);
-        m_rw(ye);
-        m_rw(me);
-        m_rw(de);
-        if (m.is_true(valid)) {
-            assert_axiom(ye);
-            assert_axiom(me);
-            assert_axiom(de);
-            return;
-        }
-        literal lv = mk_literal(valid);
-        ctx.mark_as_relevant(lv);
-        for (expr* e : { ye.get(), me.get(), de.get() }) {
-            if (m.is_true(e))
-                continue;
-            literal l = mk_literal(e);
-            ctx.mark_as_relevant(l);
-            ctx.mk_th_axiom(get_id(), ~lv, l);
-        }
+        // implicit validity obligation on symbolic date.mk arguments.
+        // Internal constructor terms (add_arith_axioms) are exempt: their
+        // arguments are calendar-valid by construction and the obligation
+        // would only burden the arithmetic solver with redundant constraints.
+        if (!m_internal_mk.contains(t))
+            assert_axiom(u.mk_valid_expr(y, mo, d));
+        assert_axiom(m.mk_eq(u.mk_year(t), y));
+        assert_axiom(m.mk_eq(u.mk_month(t), mo));
+        assert_axiom(m.mk_eq(u.mk_day(t), d));
     }
 
     /**
@@ -190,6 +192,10 @@ namespace smt {
         m_rw(om);
         m_rw(od);
         app_ref mkc(u.mk_mk(oy, om, od), m);
+        if (!m_internal_mk.contains(mkc)) {
+            m_internal_mk.insert(mkc);
+            m_pinned.push_back(mkc);
+        }
         assert_axiom(m.mk_eq(u.mk_year(mkc), oy));
         assert_axiom(m.mk_eq(u.mk_month(mkc), om));
         assert_axiom(m.mk_eq(u.mk_day(mkc), od));
