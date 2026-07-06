@@ -359,6 +359,10 @@ protected:
     bool logic_has_date() const;
     bool logic_has_recfun() const;
 
+    // conjoin the implicit validity obligations of the Dates theory
+    // (one per date.mk occurrence) onto an asserted formula
+    expr_ref mk_date_obligations(expr* t);
+
     void print_unsupported_msg() { regular_stream() << "unsupported" << std::endl; }
     void print_unsupported_info(symbol const& s, int line, int pos) { if (s != symbol::null) diagnostic_stream() << "; " << s << " line: " << line << " position: " << pos << std::endl;}
 

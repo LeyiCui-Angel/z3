@@ -41,6 +41,7 @@ Notes:
 #include "ast/well_sorted.h"
 #include "ast/for_each_expr.h"
 #include "ast/rewriter/th_rewriter.h"
+#include "ast/rewriter/date_axioms.h"
 #include "ast/rewriter/recfun_replace.h"
 #include "ast/polymorphism_util.h"
 #include "model/model_evaluator.h"
@@ -803,6 +804,25 @@ bool cmd_context::logic_has_fpa() const {
 
 bool cmd_context::logic_has_date() const {
     return !has_logic() || smt_logics::logic_has_date(m_logic);
+}
+
+// The Dates theory attaches an implicit validity obligation to every
+// date.mk occurrence of an asserted formula (Dates.smt2, :notes). The
+// obligations are conjoined at assertion level, before any
+// preprocessing, so that simplification and variable elimination cannot
+// drop or transform the occurrences that carry them.
+expr_ref cmd_context::mk_date_obligations(expr* t) {
+    expr_ref r(t, m());
+    if (!logic_has_date() || !m_manager)
+        return r;
+    dates::axioms ax(m());
+    expr_ref_vector obligations(m());
+    ax.collect_obligations(t, obligations);
+    if (obligations.empty())
+        return r;
+    obligations.push_back(t);
+    r = m().mk_and(obligations);
+    return r;
 }
 
 bool cmd_context::logic_has_array() const {
@@ -1592,6 +1612,8 @@ void cmd_context::assert_expr(expr * t) {
     scoped_rlimit no_limit(m().limit(), 0);
     if (!m_check_logic(t))
         throw cmd_exception(m_check_logic.get_last_error());
+    expr_ref t_obl = mk_date_obligations(t);
+    t = t_obl;
     m_check_sat_result = nullptr;
     m().inc_ref(t);
     m_assertions.push_back(t);
@@ -1610,6 +1632,8 @@ void cmd_context::assert_expr(symbol const & name, expr * t) {
     }
     scoped_rlimit no_limit(m().limit(), 0);
 
+    expr_ref t_obl = mk_date_obligations(t);
+    t = t_obl;
     m_check_sat_result = nullptr;
     m().inc_ref(t);
     m_assertions.push_back(t);

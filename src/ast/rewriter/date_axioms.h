@@ -17,8 +17,12 @@ Abstract:
                        1 <= day(t) <= days_in_month(year(t), month(t))
     - reconstruction:  t = (date.mk (date.year t) (date.month t) (date.day t))
                        for terms that are not date.mk applications
-    - constructor:     for (date.mk y m d), if (y, m, d) is calendar-valid
-                       then the selectors return y, m and d
+    - constructor:     every (date.mk y m d) occurrence carries the
+                       implicit validity obligation of the DateSAT
+                       front-end (Dates.smt2, :notes): (y, m, d) is
+                       asserted calendar-valid and the selectors return
+                       the arguments. Over concrete arguments the
+                       obligation folds to true or false.
     - arithmetic:      date.add/date.sub are defined through the epoch-day
                        bijection between calendar-valid dates and integers
                        (days_from_civil / civil_from_days, using only
@@ -85,6 +89,14 @@ namespace dates {
 
         // emit defining axioms for a term of sort Date
         void term_axioms(expr* t);
+
+        // collect the implicit validity obligations of the DateSAT
+        // front-end: one obligation per (date.mk y m d) occurrence in
+        // fml, requiring (y, m, d) to be calendar-valid. Occurrences
+        // under quantifiers are not visited. Used at assertion level so
+        // the obligations survive preprocessing (e.g. solve-eqs
+        // eliminating the only variable equated to a date.mk term).
+        void collect_obligations(expr* fml, expr_ref_vector& obligations);
 
         // emit defining axioms for a comparison atom date.lt/le/gt/ge
         void compare_axioms(app* atom);

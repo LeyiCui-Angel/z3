@@ -135,23 +135,41 @@ namespace dates {
         expr* y = t->get_arg(0);
         expr* mo = t->get_arg(1);
         expr* d = t->get_arg(2);
-        rational ry, rmo, rd;
-        if (dt.is_numeral_mk(t, ry, rmo, rd)) {
-            // concrete constructor application; selector values are
-            // guaranteed for calendar-valid triples only
-            if (date_util::is_valid_date(ry, rmo, rd)) {
-                add_eq(dt.mk_year(t), y);
-                add_eq(dt.mk_month(t), mo);
-                add_eq(dt.mk_day(t), d);
+        // every date.mk occurrence carries the implicit validity
+        // obligation of the DateSAT front-end on its argument triple
+        // (Dates.smt2, :notes). Over concrete arguments the obligation
+        // folds to true (calendar-valid triple) or false (invalid
+        // application). With the triple valid, the selector equations
+        // hold unconditionally.
+        add_axiom(mk_valid_triple(y, mo, d));
+        add_eq(dt.mk_year(t), y);
+        add_eq(dt.mk_month(t), mo);
+        add_eq(dt.mk_day(t), d);
+    }
+
+    void axioms::collect_obligations(expr* fml, expr_ref_vector& obligations) {
+        ptr_vector<expr> todo;
+        expr_fast_mark1 visited;
+        todo.push_back(fml);
+        while (!todo.empty()) {
+            expr* e = todo.back();
+            todo.pop_back();
+            if (visited.is_marked(e) || !is_app(e))
+                continue;
+            visited.mark(e);
+            app* t = to_app(e);
+            for (expr* arg : *t)
+                todo.push_back(arg);
+            if (!dt.is_mk(t))
+                continue;
+            rational ry, rmo, rd;
+            if (dt.is_numeral_mk(t, ry, rmo, rd)) {
+                if (!date_util::is_valid_date(ry, rmo, rd))
+                    obligations.push_back(m.mk_false());
             }
-            return;
+            else
+                obligations.push_back(mk_valid_triple(t->get_arg(0), t->get_arg(1), t->get_arg(2)));
         }
-        expr_ref guard = mk_valid_triple(y, mo, d);
-        expr_ref sel(m.mk_and(m.mk_eq(dt.mk_year(t), y),
-                              m.mk_eq(dt.mk_month(t), mo),
-                              m.mk_eq(dt.mk_day(t), d)), m);
-        expr_ref ax(m.mk_implies(guard, sel), m);
-        add_axiom(ax);
     }
 
     void axioms::add_op_axioms(app* t, bool subtract) {
