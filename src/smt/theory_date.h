@@ -40,8 +40,10 @@ namespace smt {
 
         theory_var mk_var(enode* n) override;
         void assert_axiom(expr* e);
+        void assert_axiom_norewrite(expr* e);
         void assert_implies(expr* premise, expr* conseq);
         void assert_iff(literal lit, expr* def);
+        void add_year_range_preference(expr* y);
         void add_date_axioms(enode* n);
         void add_mk_axioms(app* term);
         void add_arith_axioms(app* term, bool is_sub);

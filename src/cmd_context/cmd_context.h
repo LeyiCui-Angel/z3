@@ -356,6 +356,7 @@ protected:
     bool logic_has_array() const;
     bool logic_has_datatype() const;
     bool logic_has_date() const;
+    void add_date_validity_obligations(expr_ref & t);
     bool logic_has_fpa() const;
     bool logic_has_recfun() const;
 

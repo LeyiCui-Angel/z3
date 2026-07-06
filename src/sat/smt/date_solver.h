@@ -44,6 +44,7 @@ namespace date {
         unsigned      m_nodes_qhead = 0;
         obj_pair_hashtable<expr, expr> m_diseq_seen;
         expr_ref_vector m_diseq_trail;
+        indexed_uint_set m_year_pref_vars;
 
         void attach_new_th_var(enode* n);
         bool selector_enodes(euf::enode* n, euf::enode*& y, euf::enode*& mo, euf::enode*& d);
@@ -53,6 +54,8 @@ namespace date {
         void add_arith_axioms(app* t, bool is_sub);
         void add_cmp_axioms(app* atom);
         void assert_unit(expr* e);
+        void add_year_range_preference(expr* y);
+        void assert_unit_norewrite(expr* e);
         void assert_implies(expr* premise, expr* conseq);
         void assert_iff(literal lit, expr* def);
         expr_ref mk_lex_cmp(expr* x, expr* y, bool strict);
@@ -67,6 +70,7 @@ namespace date {
         void asserted(literal l) override {}
         sat::check_result check() override;
         bool unit_propagate() override;
+        bool decide(sat::bool_var& var, lbool& phase) override;
 
         std::ostream& display(std::ostream& out) const override;
         std::ostream& display_justification(std::ostream& out, sat::ext_justification_idx idx) const override { return out; }

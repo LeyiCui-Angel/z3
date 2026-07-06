@@ -131,6 +131,13 @@ namespace date {
         add_unit(mk_literal(f));
     }
 
+    // assert e verbatim, without running the rewriter: used for selector
+    // equations of concrete constructor applications, where the rewriter
+    // would fold the selector term away and leave no enode for congruence
+    void solver::assert_unit_norewrite(expr* e) {
+        add_unit(mk_literal(e));
+    }
+
     void solver::assert_implies(expr* premise, expr* conseq) {
         expr_ref p(premise, m), c(conseq, m);
         m_rw(p);
@@ -169,10 +176,35 @@ namespace date {
         return u.mk_rata_die(u.mk_year(d), u.mk_month(d), u.mk_day(d));
     }
 
+    // phase preference, not an axiom: try to place years in the familiar
+    // calendar range first, so that unconstrained dates receive natural
+    // model values; out-of-range years remain reachable when required
+    void solver::add_year_range_preference(expr* y) {
+        expr_ref lo(a.mk_ge(y, a.mk_int(1)), m), hi(a.mk_le(y, a.mk_int(9999)), m);
+        for (expr* b : { lo.get(), hi.get() }) {
+            literal l = mk_literal(b);
+            if (l.sign())
+                continue;
+            s().set_phase(l);
+            if (!m_year_pref_vars.contains(l.var()))
+                m_year_pref_vars.insert(l.var());
+        }
+    }
+
+    // keep the year-range preference sticky across restarts and rephasing:
+    // whenever the SAT engine decides one of the preference atoms, pick the
+    // in-range polarity first
+    bool solver::decide(sat::bool_var& var, lbool& phase) {
+        if (m_year_pref_vars.contains(var))
+            phase = l_true;
+        return false;
+    }
+
     // every Date term denotes a calendar-valid date and is reconstructed
     // from its selector triple
     void solver::add_date_axioms(expr* t) {
         expr_ref y(u.mk_year(t), m), mo(u.mk_month(t), m), d(u.mk_day(t), m);
+        add_year_range_preference(y);
         assert_unit(a.mk_le(a.mk_int(1), mo));
         assert_unit(a.mk_le(mo, a.mk_int(12)));
         assert_unit(a.mk_le(a.mk_int(1), d));
@@ -192,17 +224,23 @@ namespace date {
         rational ry, rm, rd;
         if (a.is_numeral(y, ry) && a.is_numeral(mo, rm) && a.is_numeral(d, rd)) {
             if (date_util::is_valid_date(ry, rm, rd)) {
-                assert_unit(m.mk_eq(u.mk_year(t), y));
-                assert_unit(m.mk_eq(u.mk_month(t), mo));
-                assert_unit(m.mk_eq(u.mk_day(t), d));
+                // assert the selector equations verbatim: the rewriter would
+                // evaluate the selectors to the numerals, dropping the enodes
+                // needed to propagate the components to congruent date terms
+                assert_unit_norewrite(m.mk_eq(u.mk_year(t), y));
+                assert_unit_norewrite(m.mk_eq(u.mk_month(t), mo));
+                assert_unit_norewrite(m.mk_eq(u.mk_day(t), d));
             }
             // invalid concrete constructor applications are unspecified
             return;
         }
-        expr_ref valid = u.mk_is_valid(y, mo, d);
-        assert_implies(valid, m.mk_eq(u.mk_year(t), y));
-        assert_implies(valid, m.mk_eq(u.mk_month(t), mo));
-        assert_implies(valid, m.mk_eq(u.mk_day(t), d));
+        // symbolic date construction carries an implicit validity obligation
+        // on the argument triple; with it the selector equations hold
+        // unconditionally
+        assert_unit(u.mk_is_valid(y, mo, d));
+        assert_unit(m.mk_eq(u.mk_year(t), y));
+        assert_unit(m.mk_eq(u.mk_month(t), mo));
+        assert_unit(m.mk_eq(u.mk_day(t), d));
     }
 
     // the Rata Die number of the result of date.add/date.sub relates the

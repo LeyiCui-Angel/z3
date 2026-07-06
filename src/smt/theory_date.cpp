@@ -137,6 +137,22 @@ namespace smt {
         ctx.mk_th_axiom(get_id(), 1, &lit);
     }
 
+    // assert e verbatim, without running the rewriter: used for selector
+    // equations of concrete constructor applications, where the rewriter
+    // would fold the selector term away and leave no enode for congruence
+    void theory_date::assert_axiom_norewrite(expr* e) {
+        expr_ref f(e, m);
+        TRACE(date, tout << "assert (no rewrite): " << mk_pp(f, m) << "\n";);
+        if (m.has_trace_stream())
+            log_axiom_instantiation(f);
+        ctx.internalize(f, false);
+        if (m.has_trace_stream())
+            m.trace_stream() << "[end-of-instance]\n";
+        literal lit(ctx.get_literal(f));
+        ctx.mark_as_relevant(lit);
+        ctx.mk_th_axiom(get_id(), 1, &lit);
+    }
+
     void theory_date::assert_implies(expr* premise, expr* conseq) {
         expr_ref p(premise, m), c(conseq, m);
         m_rw(p);
@@ -186,12 +202,28 @@ namespace smt {
         return u.mk_rata_die(u.mk_year(d), u.mk_month(d), u.mk_day(d));
     }
 
+    // phase preference, not an axiom: try to place years in the familiar
+    // calendar range first, so that unconstrained dates receive natural
+    // model values; out-of-range years remain reachable when required
+    void theory_date::add_year_range_preference(expr* y) {
+        expr_ref lo(a.mk_ge(y, a.mk_int(1)), m), hi(a.mk_le(y, a.mk_int(9999)), m);
+        for (expr* b : { lo.get(), hi.get() }) {
+            ctx.internalize(b, false);
+            literal l = ctx.get_literal(b);
+            if (l.sign())
+                continue;
+            ctx.mark_as_relevant(l);
+            ctx.set_true_first_flag(l.var());
+        }
+    }
+
     // every Date term denotes a calendar-valid date and is reconstructed
     // from its selector triple
     void theory_date::add_date_axioms(enode* n) {
         expr* t = n->get_expr();
         SASSERT(u.is_date(t));
         expr_ref y(u.mk_year(t), m), mo(u.mk_month(t), m), d(u.mk_day(t), m);
+        add_year_range_preference(y);
         assert_axiom(a.mk_le(a.mk_int(1), mo));
         assert_axiom(a.mk_le(mo, a.mk_int(12)));
         assert_axiom(a.mk_le(a.mk_int(1), d));
@@ -211,17 +243,23 @@ namespace smt {
         rational ry, rm, rd;
         if (a.is_numeral(y, ry) && a.is_numeral(mo, rm) && a.is_numeral(d, rd)) {
             if (date_util::is_valid_date(ry, rm, rd)) {
-                assert_axiom(m.mk_eq(u.mk_year(term), y));
-                assert_axiom(m.mk_eq(u.mk_month(term), mo));
-                assert_axiom(m.mk_eq(u.mk_day(term), d));
+                // assert the selector equations verbatim: the rewriter would
+                // evaluate the selectors to the numerals, dropping the enodes
+                // needed to propagate the components to congruent date terms
+                assert_axiom_norewrite(m.mk_eq(u.mk_year(term), y));
+                assert_axiom_norewrite(m.mk_eq(u.mk_month(term), mo));
+                assert_axiom_norewrite(m.mk_eq(u.mk_day(term), d));
             }
             // invalid concrete constructor applications are unspecified
             return;
         }
-        expr_ref valid = u.mk_is_valid(y, mo, d);
-        assert_implies(valid, m.mk_eq(u.mk_year(term), y));
-        assert_implies(valid, m.mk_eq(u.mk_month(term), mo));
-        assert_implies(valid, m.mk_eq(u.mk_day(term), d));
+        // symbolic date construction carries an implicit validity obligation
+        // on the argument triple; with it the selector equations hold
+        // unconditionally
+        assert_axiom(u.mk_is_valid(y, mo, d));
+        assert_axiom(m.mk_eq(u.mk_year(term), y));
+        assert_axiom(m.mk_eq(u.mk_month(term), mo));
+        assert_axiom(m.mk_eq(u.mk_day(term), d));
     }
 
     // the Rata Die number of the result of date.add/date.sub relates the

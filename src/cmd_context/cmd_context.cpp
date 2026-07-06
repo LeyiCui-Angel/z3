@@ -1588,10 +1588,44 @@ void cmd_context::reset(bool finalize) {
     SASSERT(!m_own_manager || !has_manager());
 }
 
+// Date front-end semantics: every occurrence of date.mk in an asserted
+// formula carries an implicit validity obligation on its argument triple.
+// The obligation is conjoined here, before preprocessing, since tactics
+// (e.g. equality solving) may eliminate the constructor application before
+// the date theory solver gets to see it. Reconstruction terms
+// (date.mk (date.year s) (date.month s) (date.day s)) are exempt: their
+// validity is already guaranteed by the theory axioms for s.
+void cmd_context::add_date_validity_obligations(expr_ref & t) {
+    family_id date_fid = m().mk_family_id("date");
+    if (!m().get_plugin(date_fid))
+        return;
+    date_util u(m());
+    expr_ref_vector obligations(m());
+    for (expr* e : subterms::ground(t)) {
+        if (!u.is_mk(e) || u.is_selector_mk(e))
+            continue;
+        app* mk = to_app(e);
+        rational y, mo, d;
+        if (u.is_numeral_mk(mk, y, mo, d)) {
+            if (!date_util::is_valid_date(y, mo, d))
+                obligations.push_back(m().mk_false());
+        }
+        else
+            obligations.push_back(u.mk_is_valid(mk->get_arg(0), mk->get_arg(1), mk->get_arg(2)));
+    }
+    if (obligations.empty())
+        return;
+    obligations.push_back(t);
+    t = m().mk_and(obligations);
+}
+
 void cmd_context::assert_expr(expr * t) {
     scoped_rlimit no_limit(m().limit(), 0);
     if (!m_check_logic(t))
         throw cmd_exception(m_check_logic.get_last_error());
+    expr_ref t_(t, m());
+    add_date_validity_obligations(t_);
+    t = t_;
     m_check_sat_result = nullptr;
     m().inc_ref(t);
     m_assertions.push_back(t);
@@ -1610,6 +1644,9 @@ void cmd_context::assert_expr(symbol const & name, expr * t) {
     }
     scoped_rlimit no_limit(m().limit(), 0);
 
+    expr_ref t_(t, m());
+    add_date_validity_obligations(t_);
+    t = t_;
     m_check_sat_result = nullptr;
     m().inc_ref(t);
     m_assertions.push_back(t);
