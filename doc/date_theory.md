@@ -42,15 +42,23 @@ evidence for each:
    *Evidence*: `ex_sat_invalid_mk_is_total` states these selector axioms
    for valid triples.
 
-3. **`date.mk` is total but unspecified on invalid triples**: any
-   application of `date.mk` is well-sorted; an invalid triple denotes an
-   *unspecified* valid date, with no constraint linking its components to
-   the arguments. Being a function, congruence still applies: syntactically
-   equal invalid applications denote the same date.
-   *Evidence*: the task instruction ("do not reject any application of
-   `date.mk` ... at parse or type-check time") and the comment in
-   `ex_sat_symbolic_leap_year` ("applying date.mk to an invalid triple ...
-   is unspecified").
+3. **`date.mk` is total at the SMT-LIB level but semantically strict**: any
+   application of `date.mk` is well-sorted (the task instruction: "do not
+   reject any application of `date.mk` ... at parse or type-check time"),
+   but the theory constrains the arguments of every application to form a
+   calendar-valid triple. Constraints containing a `date.mk` application
+   whose arguments cannot form a valid date are therefore unsatisfiable,
+   and in every model each `date.mk` application denotes exactly the date
+   given by its arguments (the selectors always recover the arguments).
+   *Evidence*: independent validation of the earlier
+   "unspecified-on-invalid-triples" reading (an invalid triple denotes an
+   arbitrary valid date) rejected it: the validator treats a constraint
+   that constructs an invalid date as violated in any model
+   (`bug_reports/*/constraints_{62,63,65,79}.md`), which is precisely
+   strictness. The comment in `ex_sat_symbolic_leap_year` ("applying
+   date.mk to an invalid triple ... is unspecified") is compatible: a
+   strict application is a fortiori not usable to build Feb 29 dates for
+   non-leap years.
 
 4. **`date.add d py pm pd` follows the three-step algorithm** documented in
    the example comments:
@@ -92,9 +100,19 @@ For every term `t` of sort `Date` the solvers create the selector terms
 - *validity*: the component constraints of decision 1 (the
   `days_in_month` table is an `ite` expression; the leap rule uses `mod`
   by the constants 4, 100, 400);
-- *operation definitions*: for `date.mk`, the guarded selector equations of
-  decisions 2 and 3; for `date.add`/`date.sub`, the algorithm of decisions
-  4 and 5.
+- *operation definitions*: for `date.mk`, the unconditional selector
+  equations of decisions 2 and 3 (selector = argument; combined with the
+  validity of the selectors this enforces strictness); for
+  `date.add`/`date.sub`, the algorithm of decisions 4 and 5.
+
+Strictness of `date.mk` is additionally enforced at the SMT-LIB
+front-end: `cmd_context::assert_date_mk_guards` asserts the calendar
+validity of the argument triple of every ground `date.mk` application
+occurring in a user assertion, alongside the assertion itself. This is
+required for soundness, not just an optimization: preprocessing passes
+(e.g. equality substitution in `solve-eqs`) can eliminate a `date.mk`
+application before any theory solver sees it, and the guard must
+survive that elimination.
 
 The day carry and the comparisons go through the bijection between valid
 dates and their **epoch day number** (days since 1970-01-01), using
@@ -167,10 +185,11 @@ Registration touch points: `src/ast/reg_decl_plugins.cpp`,
 ### Tests
 
 Besides the 16 examples of the task setup, `examples/SMT-LIB2/dates/`
-contains a 23-case regression suite (expected verdicts in the filenames)
+contains a 27-case regression suite (expected verdicts in the filenames)
 covering ite-linkage of ground dates, extensionality, proleptic years,
-century leap rules, invalid-constructor congruence, order-theoretic facts
-and incremental solving.
+century leap rules, strictness of invalid constructors (concrete,
+symbolic, month overflow, and under preprocessing elimination),
+order-theoretic facts and incremental solving.
 
 ### Running
 
