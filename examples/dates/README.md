@@ -62,6 +62,13 @@ sort could produce a wrong `sat` — is **rejected with an error** instead:
 Uninterpreted *constants* of sort `Date`, and uninterpreted functions
 *returning* `Date` from Date-free domains, are fully supported.
 
+On the incremental path (after `push`) the smt core treats `Date` as an
+uninterpreted sort, which is sound because every observation of a `Date`
+term has already been mapped through `date.to_days` by the rewriter.
+`(get-value ...)` evaluates date operations correctly there; `(get-model)`
+may display `Date` constants as abstract universe elements (`Date!val!k`)
+rather than as `(date.from_days n)` terms.
+
 ## Tests
 
 * `*.smt2` — expected results are stated in each file's header comment;

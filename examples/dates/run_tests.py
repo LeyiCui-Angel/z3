@@ -10,8 +10,10 @@ from pathlib import Path
 Z3 = sys.argv[1] if len(sys.argv) > 1 else "z3"
 HERE = Path(__file__).parent
 
-# expected complete stdout+stderr, one entry per line; "ERROR" matches any
-# line starting with (error
+# expected complete stdout+stderr, one entry per line; "ERROR" means: at
+# least one (error ...) line, possibly "unknown" answers, and crucially no
+# sat/unsat answer (the solver must refuse to decide the unsupported
+# fragment rather than risk an unsound verdict)
 EXPECTED = {
     "known_facts.smt2": ["unsat"],
     "ordering.smt2": ["unsat"],
@@ -22,7 +24,11 @@ EXPECTED = {
     "symbolic_ymd.smt2": ["sat", "((y 2026)", " (m 7)", " (d 7))", "unsat"],
     "incremental.smt2": ["sat", "unsat", "sat", "unsat", "sat",
                          "(((date.year e) 2027)", " ((date.month e) 7)", " ((date.day e) 7))"],
+    "theorems.smt2": ["unsat", "unsat", "unsat", "unsat"],
+    "mk_inverse.smt2": ["unsat"],
+    "uf_dates.smt2": ["sat", "unsat", "sat"],
     "unsupported_uf.smt2": ["ERROR"],
+    "unsupported_datatype.smt2": ["ERROR"],
     "unsupported_quant.smt2": ["ERROR"],
     "unsupported_array.smt2": ["ERROR"],
 }
@@ -34,7 +40,8 @@ def main() -> None:
         lines = (p.stdout + p.stderr).strip().splitlines()
         ok = True
         if expected == ["ERROR"]:
-            ok = len(lines) >= 1 and all(l.startswith("(error") for l in lines) \
+            ok = any(l.startswith("(error") for l in lines) \
+                 and all(l.startswith("(error") or l == "unknown" for l in lines) \
                  and not any(l in ("sat", "unsat") for l in lines)
         else:
             ok = lines == expected

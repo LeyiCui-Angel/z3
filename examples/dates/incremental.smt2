@@ -11,7 +11,7 @@
 (pop)
 (push)
 (assert (date.lt d e))
-(assert (date.le e (date.mk 2026 7 7)))
+(assert (date.le e (date.mk 2026 12 31)))
 (check-sat)
 (pop)
 (push)

@@ -164,6 +164,13 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     // incomplete, so it is rejected here instead of risking an unsound
     // "sat" answer from treating Date terms as uninterpreted.
     void check_date_escape(func_decl * f, unsigned num, expr * const * args) {
+        // model values of sort Date -- the abstract elements the smt core
+        // invents for what it sees as an uninterpreted sort -- are as
+        // harmless as uninterpreted Date constants: every observation of
+        // them still goes through date.to_days. They occur when printing
+        // or evaluating models produced by the incremental solver path.
+        if (m().is_model_value(f))
+            return;
         for (unsigned i = 0; i < num; ++i)
             if (m_date_rw.u().sort_contains_date(args[i]->get_sort()))
                 throw rewriter_exception("dates: Date-sorted arguments of non-date functions are not supported");
