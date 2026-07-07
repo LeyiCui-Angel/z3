@@ -23,6 +23,7 @@ Notes:
 #include "ast/rewriter/arith_rewriter.h"
 #include "ast/rewriter/bv_rewriter.h"
 #include "ast/rewriter/char_rewriter.h"
+#include "ast/rewriter/date_rewriter.h"
 #include "ast/rewriter/datatype_rewriter.h"
 #include "ast/rewriter/array_rewriter.h"
 #include "ast/rewriter/fpa_rewriter.h"
@@ -54,6 +55,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     pb_rewriter         m_pb_rw;
     seq_rewriter        m_seq_rw;
     char_rewriter       m_char_rw;
+    date_rewriter       m_date_rw;
     recfun_rewriter     m_rec_rw;
     arith_util          m_a_util;
     bv_util             m_bv_util;
@@ -154,8 +156,29 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         return BR_FAILED;
     }
 
+    // The theory of dates is decided by reduction to arithmetic (see
+    // date_rewriter.h). The reduction covers Date-sorted constants,
+    // date operations, equality, distinct and ite over Date. Any other
+    // occurrence of the Date sort (arguments of uninterpreted functions,
+    // arrays/sequences/datatypes over Date, ...) would make the reduction
+    // incomplete, so it is rejected here instead of risking an unsound
+    // "sat" answer from treating Date terms as uninterpreted.
+    void check_date_escape(func_decl * f, unsigned num, expr * const * args) {
+        for (unsigned i = 0; i < num; ++i)
+            if (m_date_rw.u().sort_contains_date(args[i]->get_sort()))
+                throw rewriter_exception("dates: Date-sorted arguments of non-date functions are not supported");
+        // uninterpreted Date-valued constants/functions are part of the
+        // supported fragment; interpreted symbols of other theories that
+        // produce Date (e.g. datatype accessors) are not.
+        if (f->get_family_id() != null_family_id &&
+            m_date_rw.u().sort_contains_date(f->get_range()))
+            throw rewriter_exception("dates: functions of other theories producing Date are not supported");
+    }
+
     br_status reduce_app_core(func_decl * f, unsigned num, expr * const * args, expr_ref & result) {
         family_id fid = f->get_family_id();
+        if (fid != m_date_rw.get_fid() && fid != m_b_rw.get_fid())
+            check_date_escape(f, num, args);
         if (fid == null_family_id)
             return BR_FAILED;
         br_status st = BR_FAILED;
@@ -197,6 +220,15 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                if (st != BR_FAILED)
                     return st;
             }
+            if (k == OP_DISTINCT && num > 0) {
+                if (m_date_rw.u().is_date(args[0])) {
+                    st = m_date_rw.mk_distinct_core(num, args, result);
+                    if (st != BR_FAILED)
+                        return st;
+                }
+                else if (m_date_rw.u().sort_contains_date(args[0]->get_sort()))
+                    throw rewriter_exception("dates: distinct over sorts containing Date is not supported");
+            }
 
             return m_b_rw.mk_app_core(f, num, args, result);
         }
@@ -228,6 +260,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             return m_seq_rw.mk_app_core(f, num, args, result);
         if (fid == m_char_rw.get_fid())
             return m_char_rw.mk_app_core(f, num, args, result);
+        if (fid == m_date_rw.get_fid())
+            return m_date_rw.mk_app_core(f, num, args, result);
         if (fid == m_rec_rw.get_fid())
             return m_rec_rw.mk_app_core(f, num, args, result);
         return BR_FAILED;
@@ -685,6 +719,11 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             st = m_ar_rw.mk_eq_core(a, b, result);
         else if (s_fid == m_seq_rw.get_fid())
             st = m_seq_rw.mk_eq_core(a, b, result);
+        else if (s_fid == m_date_rw.get_fid())
+            st = m_date_rw.mk_eq_core(a, b, result);
+        if (st == BR_FAILED && s_fid != m_date_rw.get_fid() &&
+            m_date_rw.u().sort_contains_date(a->get_sort()))
+            throw rewriter_exception("dates: equality over sorts containing Date is not supported");
         if (st != BR_FAILED)
             return st;
         st = extended_bv_eq(a, b, result);
@@ -767,6 +806,11 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
                            expr * const * new_no_patterns,
                            expr_ref & result,
                            proof_ref & result_pr) {
+        // see check_date_escape: binding a Date variable escapes the fragment
+        // decided by the arithmetic reduction.
+        for (unsigned i = 0; i < old_q->get_num_decls(); ++i)
+            if (m_date_rw.u().sort_contains_date(old_q->get_decl_sort(i)))
+                throw rewriter_exception("dates: quantification over the Date sort is not supported");
         quantifier_ref q1(m());
         proof_ref p1(m()); 
         if (is_quantifier(new_body) &&
@@ -883,6 +927,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_pb_rw(m),
         m_seq_rw(m, p),
         m_char_rw(m),
+        m_date_rw(m),
         m_rec_rw(m),
         m_a_util(m),
         m_bv_util(m),

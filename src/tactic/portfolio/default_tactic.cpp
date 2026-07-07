@@ -18,6 +18,7 @@ Notes:
 --*/
 #include "tactic/portfolio/default_tactic.h"
 #include "tactic/core/simplify_tactic.h"
+#include "tactic/core/elim_dates_tactic.h"
 #include "tactic/smtlogics/qfbv_tactic.h"
 #include "tactic/smtlogics/qflia_tactic.h"
 #include "tactic/smtlogics/qflra_tactic.h"
@@ -34,7 +35,8 @@ Notes:
 #include "tactic/smtlogics/smt_tactic.h"
 
 tactic * mk_default_tactic(ast_manager & m, params_ref const & p) {
-    tactic * st = using_params(and_then(mk_simplify_tactic(m, p),
+    tactic * st = using_params(and_then(mk_elim_dates_tactic(m, p),
+                                        mk_simplify_tactic(m, p),
                                         cond(mk_and(mk_is_propositional_probe(), mk_not(mk_produce_proofs_probe())),
                                              mk_lazy_tactic(m, p, [&](auto& m, auto const& p) { return mk_fd_tactic(m, p); }),
                                         cond(mk_is_qfbv_probe(), mk_lazy_tactic(m, p, [&](auto& m, auto const& p) { return mk_qfbv_tactic(m, p); }),

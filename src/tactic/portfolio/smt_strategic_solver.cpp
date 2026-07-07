@@ -34,6 +34,7 @@ Notes:
 #include "tactic/smtlogics/qfidl_tactic.h"
 #include "tactic/smtlogics/nra_tactic.h"
 #include "tactic/portfolio/default_tactic.h"
+#include "tactic/core/elim_dates_tactic.h"
 #include "tactic/fd_solver/fd_solver.h"
 #include "tactic/fd_solver/smtfd_solver.h"
 #include "tactic/ufbv/ufbv_tactic.h"
@@ -66,7 +67,7 @@ public:
     }
 };
 
-tactic * mk_tactic_for_logic(ast_manager & m, params_ref const & p, symbol const & logic) {
+static tactic * mk_tactic_for_logic_core(ast_manager & m, params_ref const & p, symbol const & logic) {
     if (logic=="QF_UF")
         return mk_qfuf_tactic(m, p);
     else if (logic=="QF_BV")
@@ -117,8 +118,14 @@ tactic * mk_tactic_for_logic(ast_manager & m, params_ref const & p, symbol const
         return mk_horn_tactic(m, p);
     else if ((logic == "QF_FD" || logic == "SAT") && !m.proofs_enabled())
         return mk_fd_tactic(m, p);
-    else 
+    else
         return mk_default_tactic(m, p);
+}
+
+tactic * mk_tactic_for_logic(ast_manager & m, params_ref const & p, symbol const & logic) {
+    // eliminate calendar date terms up-front; a no-op (cheap syntactic check)
+    // for goals that do not mention the date theory.
+    return and_then(mk_elim_dates_tactic(m, p), mk_tactic_for_logic_core(m, p, logic));
 }
 
 static solver* mk_special_solver_for_logic(ast_manager & m, params_ref const & p, symbol const& logic) {

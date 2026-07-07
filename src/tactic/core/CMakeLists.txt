@@ -6,6 +6,7 @@ z3_add_component(core_tactics
     collect_statistics_tactic.cpp
     ctx_simplify_tactic.cpp
     der_tactic.cpp
+    elim_dates_tactic.cpp
     elim_term_ite_tactic.cpp
     elim_uncnstr_tactic.cpp
     injectivity_tactic.cpp
@@ -31,6 +32,7 @@ z3_add_component(core_tactics
     ctx_simplify_tactic.h
     demodulator_tactic.h
     der_tactic.h
+    elim_dates_tactic.h
     distribute_forall_tactic.h
     dom_simplify_tactic.h
     elim_term_ite_tactic.h

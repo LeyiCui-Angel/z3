@@ -28,6 +28,7 @@ Notes:
 #include "ast/array_decl_plugin.h"
 #include "ast/datatype_decl_plugin.h"
 #include "ast/char_decl_plugin.h"
+#include "ast/date_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
 #include "ast/pb_decl_plugin.h"
 #include "ast/fpa_decl_plugin.h"
@@ -810,6 +811,12 @@ bool cmd_context::logic_has_datatype() const {
 
 bool cmd_context::logic_has_recfun() const { return true; }
 
+bool cmd_context::logic_has_date() const {
+    // the Date sort and date operations are available unless a standard
+    // logic restricts the signature to something else.
+    return !has_logic() || m_logic == "ALL";
+}
+
 void cmd_context::init_manager_core(bool new_manager) {
     SASSERT(m_manager != 0);
     SASSERT(m_pmanager != 0);
@@ -827,6 +834,7 @@ void cmd_context::init_manager_core(bool new_manager) {
         register_plugin(symbol("seq"),      alloc(seq_decl_plugin), logic_has_seq());
         register_plugin(symbol("pb"),       alloc(pb_decl_plugin), logic_has_pb());
         register_plugin(symbol("fpa"),      alloc(fpa_decl_plugin), logic_has_fpa());
+        register_plugin(symbol("date"),     alloc(date_decl_plugin), logic_has_date());
         register_plugin(symbol("datalog_relation"), alloc(datalog::dl_decl_plugin), !has_logic());
         register_plugin(symbol("specrels"), alloc(special_relations_decl_plugin), !has_logic());
     }
@@ -845,6 +853,7 @@ void cmd_context::init_manager_core(bool new_manager) {
         load_plugin(symbol("seq"),      logic_has_seq(), fids);
         load_plugin(symbol("fpa"),      logic_has_fpa(), fids);
         load_plugin(symbol("pb"),       logic_has_pb(), fids);
+        load_plugin(symbol("date"),     logic_has_date(), fids);
 
         for (family_id fid : fids) {
             decl_plugin * p = m_manager->get_plugin(fid);

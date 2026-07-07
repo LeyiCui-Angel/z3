@@ -25,6 +25,7 @@ Revision History:
 #include "ast/recfun_decl_plugin.h"
 #include "ast/dl_decl_plugin.h"
 #include "ast/char_decl_plugin.h"
+#include "ast/date_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
 #include "ast/pb_decl_plugin.h"
 #include "ast/fpa_decl_plugin.h"
@@ -54,6 +55,9 @@ void reg_decl_plugins(ast_manager & m) {
     }
     if (!m.get_plugin(m.mk_family_id(symbol("seq")))) {
         m.register_plugin(symbol("seq"), alloc(seq_decl_plugin));
+    }
+    if (!m.get_plugin(m.mk_family_id(symbol("date")))) {
+        m.register_plugin(symbol("date"), alloc(date_decl_plugin));
     }
     if (!m.get_plugin(m.mk_family_id(symbol("fpa")))) {
         m.register_plugin(symbol("fpa"), alloc(fpa_decl_plugin));
