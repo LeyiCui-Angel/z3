@@ -196,9 +196,7 @@ bool date_util::is_date_value(expr const* e, rational& epoch) const {
     rational y, mo, d;
     if (!is_numeral_mk(e, y, mo, d))
         return false;
-    if (mo < rational(1) || mo > rational(12))
-        return false;
-    if (d < rational(1) || d > days_in_month(y, mo))
+    if (!is_valid_civil(y, mo, d))
         return false;
     epoch = days_from_civil(y, mo, d);
     return true;
@@ -227,6 +225,11 @@ rational date_util::days_in_month(rational const& y, rational const& mo) {
     }
 }
 
+bool date_util::is_valid_civil(rational const& y, rational const& mo, rational const& d) {
+    return rational(1) <= mo && mo <= rational(12) &&
+           rational(1) <= d && d <= days_in_month(y, mo);
+}
+
 rational date_util::days_from_civil(rational const& y, rational const& mo, rational const& d) {
     SASSERT(rational(1) <= mo && mo <= rational(12));
     rational const r4(4), r5(5), r100(100), r400(400);
@@ -237,14 +240,6 @@ rational date_util::days_from_civil(rational const& y, rational const& mo, ratio
     rational doy = div(rational(153) * mp + rational(2), r5) + d - rational(1);
     rational doe = rational(365) * yoe + div(yoe, r4) - div(yoe, r100) + doy;
     return rational(146097) * era + doe - rational(719468);
-}
-
-rational date_util::epoch_of_ymd(rational const& y, rational const& mo, rational const& d) {
-    rational const r12(12);
-    rational mo_total = r12 * y + mo - rational(1);
-    rational yy = div(mo_total, r12);
-    rational mm = mod(mo_total, r12) + rational(1);
-    return days_from_civil(yy, mm, d);
 }
 
 void date_util::civil_of_epoch(rational const& z, rational& y, rational& mo, rational& d) {
@@ -326,12 +321,15 @@ void date_util::mk_civil_of_epoch(expr* z, civil_expr& c) {
     c.y = a.mk_add(y1, m.mk_ite(a.mk_le(c.m, mk_num(2)), mk_num(1), mk_num(0)));
 }
 
-expr_ref date_util::mk_epoch_of_ymd(expr* y, expr* mo, expr* d) {
-    arith_util& a = m_arith;
-    expr_ref mo_total(a.mk_add(a.mk_mul(mk_num(12), y), mo, mk_num(-1)), m);
-    expr_ref yy = mk_idiv(mo_total, 12);
-    expr_ref mm(a.mk_add(mk_imod(mo_total, 12), mk_num(1)), m);
-    return mk_days_from_civil(yy, mm, d);
+expr_ref date_util::mk_days_in_month(expr* y, expr* mo) {
+    expr_ref is_leap(m.mk_or(m.mk_and(m.mk_eq(mk_imod(y, 4), mk_num(0)),
+                                      m.mk_not(m.mk_eq(mk_imod(y, 100), mk_num(0)))),
+                             m.mk_eq(mk_imod(y, 400), mk_num(0))), m);
+    expr_ref feb(m.mk_ite(is_leap, mk_num(29), mk_num(28)), m);
+    expr_ref short_month(m.mk_or(m.mk_eq(mo, mk_num(4)), m.mk_eq(mo, mk_num(6)),
+                                 m.mk_eq(mo, mk_num(9)), m.mk_eq(mo, mk_num(11))), m);
+    return expr_ref(m.mk_ite(m.mk_eq(mo, mk_num(2)), feb,
+                             m.mk_ite(short_month, mk_num(30), mk_num(31))), m);
 }
 
 expr_ref date_util::mk_year_of_epoch(expr* z) {
@@ -368,14 +366,7 @@ expr_ref date_util::mk_epoch_of_add(expr* z, expr* py, expr* pm, expr* pd) {
     expr_ref mo_total(a.mk_add(4, mo_args), m);
     expr_ref yy = mk_idiv(mo_total, 12);
     expr_ref mm(a.mk_add(mk_imod(mo_total, 12), mk_num(1)), m);
-    expr_ref is_leap(m.mk_or(m.mk_and(m.mk_eq(mk_imod(yy, 4), mk_num(0)),
-                                      m.mk_not(m.mk_eq(mk_imod(yy, 100), mk_num(0)))),
-                             m.mk_eq(mk_imod(yy, 400), mk_num(0))), m);
-    expr_ref feb(m.mk_ite(is_leap, mk_num(29), mk_num(28)), m);
-    expr_ref short_month(m.mk_or(m.mk_eq(mm, mk_num(4)), m.mk_eq(mm, mk_num(6)),
-                                 m.mk_eq(mm, mk_num(9)), m.mk_eq(mm, mk_num(11))), m);
-    expr_ref len(m.mk_ite(m.mk_eq(mm, mk_num(2)), feb,
-                          m.mk_ite(short_month, mk_num(30), mk_num(31))), m);
+    expr_ref len = mk_days_in_month(yy, mm);
     expr_ref dd(m.mk_ite(a.mk_le(c.d, len), c.d, len), m);
     return expr_ref(a.mk_add(mk_days_from_civil(yy, mm, dd), pd), m);
 }

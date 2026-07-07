@@ -1,0 +1,15 @@
+; regression: bug_reports/*/constraints_65 - (date.mk l 2 29) constrains
+; l to leap years; the model must pick one
+(set-logic ALL)
+(declare-const x Date)
+(declare-const y Date)
+(declare-const z Date)
+(declare-const l Int)
+(assert (= x (date.mk 2000 2 29)))
+(assert (= y (date.mk (+ (date.year x) 4) (date.month x) (date.day x))))
+(assert (= z (date.mk l 2 29)))
+(assert (= (date.year y) 2004))
+(assert (date.gt z y))
+(check-sat)
+(get-value (l (date.year z) (date.month z) (date.day z)))
+; EXPECT: sat, l a leap year > 2004, z = (date.mk l 2 29)

@@ -109,30 +109,47 @@ namespace dates {
         add_unit(eq_internalize(_lhs, _rhs));
     }
 
+    void solver::assert_unit_axiom(expr* e) {
+        expr_ref c(e, m);
+        rewrite(c);
+        if (m.is_true(c))
+            return;
+        add_unit(mk_literal(c));
+    }
+
     void solver::internalize_date_op(app* t) {
         switch (t->get_decl_kind()) {
         case OP_DATE_MK: {
             expr* y = t->get_arg(0);
             expr* mo = t->get_arg(1);
             expr* d = t->get_arg(2);
+            // strict constructor: the arguments must form a valid civil
+            // date; formulas that force date.mk onto out-of-range
+            // components are unsatisfiable
+            assert_unit_axiom(a.mk_ge(mo, a.mk_int(1)));
+            assert_unit_axiom(a.mk_le(mo, a.mk_int(12)));
+            assert_unit_axiom(a.mk_ge(d, a.mk_int(1)));
+            // bound-form atom (term <= numeral): the normal form the
+            // arithmetic solvers expect for theory-created literals
+            assert_unit_axiom(a.mk_le(a.mk_sub(d, u.mk_days_in_month(y, mo)), a.mk_int(0)));
             expr_ref ep(u.mk_epoch(t), m);
-            assert_axiom_eq(ep, u.mk_epoch_of_ymd(y, mo, d));
+            assert_axiom_eq(ep, u.mk_days_from_civil(y, mo, d));
+            // inverse direction, entailed by the definition and validity:
+            // the components of the epoch are the constructor arguments.
+            // This lets the arithmetic solver recover symbolic arguments
+            // from a known epoch instead of inverting days-from-civil.
+            if (!a.is_numeral(y))
+                assert_axiom_eq(y, u.mk_year_of_epoch(ep));
+            if (!a.is_numeral(mo))
+                assert_axiom_eq(mo, u.mk_month_of_epoch(ep));
+            if (!a.is_numeral(d))
+                assert_axiom_eq(d, u.mk_day_of_epoch(ep));
             // constructor-selector roundtrip fast-path
             if (u.is_year(y) && u.is_month(mo) && u.is_day(d)) {
                 expr* x = to_app(y)->get_arg(0);
                 if (x == to_app(mo)->get_arg(0) && x == to_app(d)->get_arg(0))
                     assert_axiom_eq(ep, u.mk_epoch(x));
             }
-            if (a.is_numeral(mo))
-                break;
-            // in-range shortcut: (1 <= m <= 12) => epoch = days-from-civil(y, m, d).
-            // subsumed by the definition, but lets the constructor-selector
-            // roundtrip close by congruence.
-            expr_ref lo(a.mk_ge(mo, a.mk_int(1)), m);
-            expr_ref hi(a.mk_le(mo, a.mk_int(12)), m);
-            expr_ref dfc = u.mk_days_from_civil(y, mo, d);
-            rewrite(dfc);
-            add_clause(~mk_literal(lo), ~mk_literal(hi), eq_internalize(ep, dfc));
             break;
         }
         case OP_DATE_ADD: {
@@ -245,15 +262,44 @@ namespace dates {
     }
 
     /**
+       \brief Components of dates are uniquely determined, so equal dates
+       built by date.mk have equal constructor arguments. This gives the
+       arithmetic solver the component equalities directly instead of
+       requiring it to invert the days-from-civil map.
+    */
+    void solver::assert_mk_injectivity(euf::enode* n) {
+        euf::enode* pivot = nullptr;
+        for (euf::enode* sib : euf::enode_class(n->get_root())) {
+            expr* s = sib->get_expr();
+            if (!u.is_mk(s))
+                continue;
+            if (!pivot) {
+                pivot = sib;
+                continue;
+            }
+            expr* p = pivot->get_expr();
+            sat::literal l_eq = eq_internalize(p, s);
+            for (unsigned i = 0; i < 3; ++i)
+                add_clause(~l_eq, eq_internalize(to_app(p)->get_arg(i), to_app(s)->get_arg(i)));
+        }
+    }
+
+    /**
        \brief When two epoch terms merge (through congruence, unit axioms,
        or equalities proposed by the arithmetic solver's model-based theory
-       combination), force the underlying dates to merge as well.
+       combination), force the underlying dates to merge as well. When two
+       date terms merge, propagate equalities between the arguments of
+       date.mk terms in the merged class.
     */
     void solver::new_eq_eh(euf::th_eq const& eq) {
         euf::enode* n1 = var2enode(eq.v1());
         euf::enode* n2 = var2enode(eq.v2());
         expr* e1 = n1->get_expr();
         expr* e2 = n2->get_expr();
+        if (u.is_date(e1) && u.is_date(e2)) {
+            assert_mk_injectivity(n1);
+            return;
+        }
         if (!u.is_epoch(e1) || !u.is_epoch(e2))
             return;
         euf::enode* d1 = expr2enode(to_app(e1)->get_arg(0));

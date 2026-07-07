@@ -43,7 +43,9 @@ namespace dates {
         euf::theory_var mk_var(euf::enode* n) override;
         void track_date(euf::enode* n);
         void assert_axiom_eq(expr* lhs, expr* rhs);
+        void assert_unit_axiom(expr* e);
         void assert_injectivity(euf::enode* n1, euf::enode* n2);
+        void assert_mk_injectivity(euf::enode* n);
         void assert_civil_identity(expr* d);
         void internalize_date_op(app* term);
         bool epoch_value(euf::enode* n, rational& val);

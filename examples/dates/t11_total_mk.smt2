@@ -1,10 +1,20 @@
-; date.mk is total over Int arguments; symbolic arguments are fine
+; date.mk is total at the sorting level: any Int arguments are
+; well-sorted. Semantically the arguments must form a valid civil date,
+; so the components of equal dates are uniquely determined.
 (declare-const y Int)
 (declare-const m Int)
 (declare-const dd Int)
 (assert (= (date.mk y m dd) (date.mk 2001 2 28)))
-(assert (> m 12))
-(assert (> dd 31))
 (check-sat)
 (get-value (y m dd))
-; EXPECT: sat (e.g. y=2000, m=13 with overflowing day)
+; EXPECT: sat, y=2001 m=2 dd=28 (the only valid components)
+(push)
+(assert (> m 12))
+(check-sat)
+; EXPECT: unsat (months beyond 12 do not wrap)
+(pop)
+(push)
+(assert (> dd 28))
+(check-sat)
+; EXPECT: unsat (days beyond month length do not wrap)
+(pop)

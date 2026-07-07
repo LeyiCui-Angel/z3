@@ -82,6 +82,9 @@ namespace smt {
             case AX_MK:
                 assert_mk_axioms(to_app(m_e1s.get(i)));
                 break;
+            case AX_MKINJ:
+                assert_mk_injectivity(m_e1s.get(i));
+                break;
             }
         }
         return asserted;
@@ -93,6 +96,21 @@ namespace smt {
         if (_lhs == _rhs)
             return;
         literal l = mk_eq(_lhs, _rhs, false);
+        ctx.mark_as_relevant(l);
+        ctx.mk_th_axiom(get_id(), 1, &l);
+    }
+
+    void theory_date::assert_unit_axiom(expr* e) {
+        expr_ref c(e, m);
+        m_rw(c);
+        if (m.is_true(c))
+            return;
+        if (m.is_false(c)) {
+            literal fl = false_literal;
+            ctx.mk_th_axiom(get_id(), 1, &fl);
+            return;
+        }
+        literal l = mk_literal(c);
         ctx.mark_as_relevant(l);
         ctx.mk_th_axiom(get_id(), 1, &l);
     }
@@ -194,11 +212,11 @@ namespace smt {
     }
 
     /**
-       \brief Definitional axiom for the total constructor, plus a shortcut
-       for in-range months: (1 <= m <= 12) => epoch = days-from-civil(y, m, d).
-       The shortcut is subsumed semantically by the definition (month
-       normalization is the identity on [1,12]) but lets the constructor-
-       selector roundtrip close by congruence.
+       \brief Axioms for the strict constructor. The arguments must form a
+       valid civil date: 1 <= m <= 12 and 1 <= d <= days-in-month(y, m);
+       formulas that force date.mk onto out-of-range components are
+       unsatisfiable. Under these constraints the epoch is defined by
+       days-from-civil directly.
     */
     void theory_date::assert_mk_axioms(app* mk) {
         if (!ctx.e_internalized(mk))
@@ -206,25 +224,59 @@ namespace smt {
         expr* y = mk->get_arg(0);
         expr* mo = mk->get_arg(1);
         expr* d = mk->get_arg(2);
+        assert_unit_axiom(a.mk_ge(mo, a.mk_int(1)));
+        assert_unit_axiom(a.mk_le(mo, a.mk_int(12)));
+        assert_unit_axiom(a.mk_ge(d, a.mk_int(1)));
+        // bound-form atom (term <= numeral): the normal form the
+        // arithmetic solvers expect for theory-created literals
+        assert_unit_axiom(a.mk_le(a.mk_sub(d, u.mk_days_in_month(y, mo)), a.mk_int(0)));
         expr_ref ep(u.mk_epoch(mk), m);
-        assert_eq_axiom(ep, u.mk_epoch_of_ymd(y, mo, d));
+        assert_eq_axiom(ep, u.mk_days_from_civil(y, mo, d));
+        // inverse direction, entailed by the definition and validity:
+        // the components of the epoch are the constructor arguments.
+        // This lets the arithmetic solver recover symbolic arguments
+        // from a known epoch instead of inverting days-from-civil.
+        if (!a.is_numeral(y))
+            assert_eq_axiom(y, u.mk_year_of_epoch(ep));
+        if (!a.is_numeral(mo))
+            assert_eq_axiom(mo, u.mk_month_of_epoch(ep));
+        if (!a.is_numeral(d))
+            assert_eq_axiom(d, u.mk_day_of_epoch(ep));
         // constructor-selector roundtrip fast-path
         if (u.is_year(y) && u.is_month(mo) && u.is_day(d)) {
             expr* x = to_app(y)->get_arg(0);
             if (x == to_app(mo)->get_arg(0) && x == to_app(d)->get_arg(0))
                 assert_eq_axiom(ep, u.mk_epoch(x));
         }
-        if (a.is_numeral(mo))
+    }
+
+    /**
+       \brief Components of dates are uniquely determined, so equal dates
+       built by date.mk have equal constructor arguments. This gives the
+       arithmetic solver the component equalities directly instead of
+       requiring it to invert the days-from-civil map.
+    */
+    void theory_date::assert_mk_injectivity(expr* e) {
+        if (!ctx.e_internalized(e))
             return;
-        literal l1 = mk_literal(a.mk_ge(mo, a.mk_int(1)));
-        literal l2 = mk_literal(a.mk_le(mo, a.mk_int(12)));
-        expr_ref dfc = u.mk_days_from_civil(y, mo, d);
-        m_rw(dfc);
-        literal leq = mk_eq(ep, dfc, false);
-        ctx.mark_as_relevant(l1);
-        ctx.mark_as_relevant(l2);
-        ctx.mark_as_relevant(leq);
-        ctx.mk_th_axiom(get_id(), ~l1, ~l2, leq);
+        enode* n = ctx.get_enode(e);
+        app* pivot = nullptr;
+        for (enode* sib : *n->get_root()) {
+            expr* s = sib->get_expr();
+            if (!u.is_mk(s))
+                continue;
+            if (!pivot) {
+                pivot = to_app(s);
+                continue;
+            }
+            literal l_eq = mk_eq(pivot, s, false);
+            ctx.mark_as_relevant(l_eq);
+            for (unsigned i = 0; i < 3; ++i) {
+                literal l_arg = mk_eq(pivot->get_arg(i), to_app(s)->get_arg(i), false);
+                ctx.mark_as_relevant(l_arg);
+                ctx.mk_th_axiom(get_id(), ~l_eq, l_arg);
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -300,6 +352,13 @@ namespace smt {
     void theory_date::apply_sort_cnstr(enode* n, sort* s) {
         SASSERT(u.is_date(s));
         ensure_var(n);
+    }
+
+    void theory_date::new_eq_eh(theory_var v1, theory_var v2) {
+        expr* e1 = get_enode(v1)->get_expr();
+        expr* e2 = get_enode(v2)->get_expr();
+        if (u.is_date(e1) && u.is_date(e2))
+            push_axiom(AX_MKINJ, e1);
     }
 
     void theory_date::new_diseq_eh(theory_var v1, theory_var v2) {

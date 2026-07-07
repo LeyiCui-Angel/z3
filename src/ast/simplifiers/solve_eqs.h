@@ -20,6 +20,7 @@ Author:
 
 #include "util/scoped_ptr_vector.h"
 #include "ast/expr_substitution.h"
+#include "ast/date_decl_plugin.h"
 #include "ast/rewriter/th_rewriter.h"
 #include "ast/simplifiers/extract_eqs.h"
 
@@ -48,6 +49,7 @@ namespace euf {
         stats                         m_stats;
         config                        m_config;
         th_rewriter                   m_rewriter;
+        date_util                     m_dates;
         scoped_ptr_vector<extract_eq> m_extract_plugins;
         unsigned_vector               m_var2id;        // app->get_id() |-> small numeral
         ptr_vector<app>               m_id2var;        // small numeral |-> app

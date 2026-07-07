@@ -18,17 +18,17 @@ Abstract:
 
     Semantic conventions implemented here and by the theory solvers:
 
-    - (date.mk y m d) is total. The month is normalized first:
-      overflow and underflow of the month carry into the year
-      (mo = 12*y + m - 1 total months). The day is then interpreted
-      as an offset from day 1 of the resolved month, so out-of-range
-      days spill over into adjacent months (mktime convention).
-      Examples: (date.mk 2000 2 30) = 2000-03-01,
-                (date.mk 2000 13 1) = 2001-01-01,
-                (date.mk 2000 1 0)  = 1999-12-31.
+    - (date.mk y m d) is total at the sorting level, but semantically
+      strict: it denotes a date only when the arguments form a valid
+      civil date, i.e. 1 <= m <= 12 and 1 <= d <= days-in-month(y, m).
+      The theory solvers assert these validity constraints for every
+      occurrence of date.mk, so constraints that force an application
+      of date.mk to out-of-range components (e.g. (date.mk 2020 2 30))
+      are unsatisfiable. There is no normalization: February 30th is
+      not a date.
 
-    - date.year/date.month/date.day return the components of the
-      normalized date.
+    - date.year/date.month/date.day return exactly the components the
+      date was constructed from.
 
     - (date.add d py pm pd) adds 12*py + pm months in a single step,
       clamps the day-of-month to the length of the target month
@@ -163,13 +163,13 @@ public:
 
     /**
        \brief Date value from an epoch day number: (date.mk y m d) with
-       normalized numeral arguments.
+       the valid civil components of that day as numeral arguments.
     */
     app* mk_date_value(rational const& epoch);
 
     /**
        \brief Recognize (date.mk y m d) with numeral arguments; returns the
-       (unnormalized) components.
+       components, which need not form a valid date.
     */
     bool is_numeral_mk(expr const* e, rational& y, rational& mo, rational& d) const;
 
@@ -185,8 +185,8 @@ public:
 
     static bool is_leap_year(rational const& y);
     static rational days_in_month(rational const& y, rational const& mo);
-    // total constructor semantics: month overflow first, then day offset
-    static rational epoch_of_ymd(rational const& y, rational const& mo, rational const& d);
+    // strict constructor semantics: 1 <= mo <= 12 and 1 <= d <= days_in_month
+    static bool is_valid_civil(rational const& y, rational const& mo, rational const& d);
     // epoch of a valid civil triple (mo in [1,12], d unrestricted offset)
     static rational days_from_civil(rational const& y, rational const& mo, rational const& d);
     static void civil_of_epoch(rational const& z, rational& y, rational& mo, rational& d);
@@ -197,10 +197,9 @@ public:
     // symbolic encodings of the calendar functions over Int terms.
     // All use only linear arithmetic, ite, and div/mod by constants.
 
-    // epoch of (date.mk y mo d) - the total constructor
-    expr_ref mk_epoch_of_ymd(expr* y, expr* mo, expr* d);
-    // epoch of the civil triple (y, mo, d) for mo in [1,12]; agrees with
-    // mk_epoch_of_ymd on that range but skips month normalization
+    // number of days in month mo of year y, for mo in [1,12]
+    expr_ref mk_days_in_month(expr* y, expr* mo);
+    // epoch of the civil triple (y, mo, d) for mo in [1,12]
     expr_ref mk_days_from_civil(expr* y, expr* mo, expr* d);
     // components of a date given by its epoch day
     expr_ref mk_year_of_epoch(expr* z);

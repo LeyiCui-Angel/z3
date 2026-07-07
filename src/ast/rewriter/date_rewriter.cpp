@@ -48,20 +48,16 @@ br_status date_rewriter::mk_app_core(func_decl* f, unsigned num_args, expr* cons
 }
 
 /**
-   \brief Epoch day of a date given as date.mk over numerals (not
-   necessarily normalized).
+   \brief Epoch day of a date given as date.mk over numerals forming a
+   valid civil date. Invalid components have no date value; terms built
+   from them are left to the theory solvers, whose validity axioms make
+   the constraints unsatisfiable.
 */
 bool date_rewriter::date_epoch_value(expr* e, rational& z) const {
-    rational y, mo, d;
-    if (!m_util.is_numeral_mk(e, y, mo, d))
-        return false;
-    z = date_util::epoch_of_ymd(y, mo, d);
-    return true;
+    return m_util.is_date_value(e, z);
 }
 
 br_status date_rewriter::mk_date_mk(expr* y, expr* mo, expr* d, expr_ref& result) {
-    rational ry, rmo, rd;
-    arith_util& a = m_util.arith();
     // constructor-selector roundtrip: (date.mk (date.year x) (date.month x) (date.day x)) = x
     if (m_util.is_year(y) && m_util.is_month(mo) && m_util.is_day(d)) {
         expr* x = to_app(y)->get_arg(0);
@@ -70,14 +66,9 @@ br_status date_rewriter::mk_date_mk(expr* y, expr* mo, expr* d, expr_ref& result
             return BR_DONE;
         }
     }
-    if (!a.is_numeral(y, ry) || !a.is_numeral(mo, rmo) || !a.is_numeral(d, rd))
-        return BR_FAILED;
-    rational z = date_util::epoch_of_ymd(ry, rmo, rd);
-    app* value = m_util.mk_date_value(z);
-    if (value->get_arg(0) == y && value->get_arg(1) == mo && value->get_arg(2) == d)
-        return BR_FAILED; // already normalized
-    result = value;
-    return BR_DONE;
+    // date.mk over numerals is already in normal form: valid triples are
+    // canonical date values, invalid ones denote no date (strict semantics)
+    return BR_FAILED;
 }
 
 br_status date_rewriter::mk_date_selector(date_op_kind k, expr* d, expr_ref& result) {

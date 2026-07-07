@@ -8,8 +8,8 @@ Module Name:
 Abstract:
 
     Rewriting rules for date terms: constant folding of the calendar
-    operations, normalization of date.mk applied to numerals, and
-    reduction of date.gt/date.ge/date.sub to date.lt/date.le/date.add.
+    operations over valid date values, and reduction of
+    date.gt/date.ge/date.sub to date.lt/date.le/date.add.
 
 Author:
 

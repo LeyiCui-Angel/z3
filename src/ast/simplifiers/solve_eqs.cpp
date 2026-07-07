@@ -141,6 +141,16 @@ namespace euf {
                             continue;
                         visited.mark(e, true);
                         if (is_app(e)) {
+                            // the date theory is strict: an occurrence of date.mk
+                            // outside its domain of valid civil dates makes the
+                            // constraints unsatisfiable, enforced by theory axioms
+                            // over the occurrence. Solving x = t would move the
+                            // occurrence into the model converter and lose that
+                            // constraint, so such definitions are not substituted.
+                            if (m_dates.is_mk(e) && !m_dates.is_date_value(e)) {
+                                is_safe = false;
+                                break;
+                            }
                             for (expr* arg : *to_app(e))
                                 m_todo.push_back(arg);
                         }
@@ -327,7 +337,7 @@ namespace euf {
     }
 
     solve_eqs::solve_eqs(ast_manager& m, dependent_expr_state& fmls) : 
-        dependent_expr_simplifier(m, fmls), m_rewriter(m) {
+        dependent_expr_simplifier(m, fmls), m_rewriter(m), m_dates(m) {
         register_extract_eqs(m, m_extract_plugins);
         m_rewriter.set_flat_and_or(false);
     }

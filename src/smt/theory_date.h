@@ -12,7 +12,8 @@ Abstract:
     The solver reduces all date operations to integer arithmetic over
     the internal injection date.epoch! : Date -> Int:
 
-    - (date.mk y m d)        epoch(t) = epoch-of-ymd(y, m, d)
+    - (date.mk y m d)        1 <= m <= 12, 1 <= d <= days-in-month(y, m),
+                             epoch(t) = days-from-civil(y, m, d)
     - (date.add d py pm pd)  epoch(t) = epoch-of-add(epoch(d), py, pm, pd)
     - (date.sub d py pm pd)  epoch(t) = epoch-of-add(epoch(d), -py, -pm, -pd)
     - date.year/month/day    t = component-of-epoch(epoch(d))
@@ -56,7 +57,9 @@ namespace smt {
             AX_EPOCH_BOUND, // e1 is a Date term whose epoch is registered with arith
             AX_INJ,         // e1, e2 are Date terms: epoch(e1) = epoch(e2) => e1 = e2
             AX_CIVIL,       // e1 is a Date term: epoch = days-from-civil(components)
-            AX_MK           // e1 is a date.mk term: definition + in-range shortcut
+            AX_MK,          // e1 is a date.mk term: validity constraints + definition
+            AX_MKINJ        // e1 is a Date term whose class contains date.mk terms:
+                            // equal dates have equal components
         };
 
         date_util       u;
@@ -73,11 +76,13 @@ namespace smt {
         void push_axiom(axiom_kind k, expr* e1, expr* e2 = nullptr);
         bool flush_axioms();
         void assert_eq_axiom(expr* lhs, expr* rhs);
+        void assert_unit_axiom(expr* e);
         void assert_cmp_axiom(app* atom);
         void assert_epoch_bound(expr* d);
         void assert_injectivity(expr* d1, expr* d2);
         void assert_civil_identity(expr* d);
         void assert_mk_axioms(app* mk);
+        void assert_mk_injectivity(expr* e);
 
         void ensure_var(enode* n);
         bool epoch_value(enode* n, rational& val);
@@ -91,7 +96,7 @@ namespace smt {
         bool internalize_atom(app* atom, bool gate_ctx) override;
         bool internalize_term(app* term) override;
         void apply_sort_cnstr(enode* n, sort* s) override;
-        void new_eq_eh(theory_var v1, theory_var v2) override {}
+        void new_eq_eh(theory_var v1, theory_var v2) override;
         void new_diseq_eh(theory_var v1, theory_var v2) override;
         bool can_propagate() override { return m_qhead < m_kinds.size(); }
         void propagate() override { flush_axioms(); }
