@@ -73,6 +73,7 @@ namespace smt {
     }
 
     void setup::setup_default() {
+        fprintf(stderr, "DBG setup_default logic=%s\n", m_logic.str().c_str());
         if (m_logic == "QF_UF") 
             setup_QF_UF();
         else if (m_logic == "QF_RDL")
@@ -140,6 +141,7 @@ namespace smt {
     }
 
     void setup::setup_auto_config() {
+        fprintf(stderr, "DBG setup_auto_config\n");
         static_features    st(m_manager);
         IF_VERBOSE(100, verbose_stream() << "(smt.configuring)\n";);
         TRACE(setup, tout << "setup, logic: " << m_logic << "\n";);
@@ -790,6 +792,7 @@ namespace smt {
     }
 
     void setup::setup_date() {
+        fprintf(stderr, "DBG setup_date\n");
         m_context.register_plugin(alloc(smt::theory_date, m_context));
     }
 
@@ -799,6 +802,7 @@ namespace smt {
     }
 
     void setup::setup_unknown() {
+        fprintf(stderr, "DBG setup_unknown()\n");
         static_features st(m_manager);
         ptr_vector<expr> fmls;
         m_context.get_asserted_formulas(fmls);
@@ -835,7 +839,14 @@ namespace smt {
     }
 
     void setup::setup_unknown(static_features & st) {
+        fprintf(stderr, "DBG setup_unknown(st)\n");
         TRACE(setup, tout << "setup_unknown\n";);
+        if (st.m_has_date) {
+            // the Date theory is not part of any specialized logic
+            // configuration: fall back to the full setup
+            setup_unknown();
+            return;
+        }
         if (st.m_num_quantifiers > 0) {
             if (st.m_has_real)
                 setup_AUFLIRA(false);

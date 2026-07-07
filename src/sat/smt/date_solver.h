@@ -42,16 +42,53 @@ namespace dates {
             expr*  m_day { nullptr };
         };
 
+        // Defining axioms of a date term, built once per expression and
+        // never popped: theory variables and their axioms are replayed
+        // after backtracking, and reusing the same constants and formulas
+        // keeps the replayed axioms identical to the original ones.
+        //
+        // The axioms come in two layers. The epoch layer defines the
+        // epoch day number of the term (as a numeral, an arithmetic
+        // shift, or the month arithmetic of date.add/date.sub) and keeps
+        // it inside [min_epoch(), max_epoch()], which is all that
+        // comparisons, equalities and models need. The civil layer
+        // introduces the (year, month, day) components together with the
+        // epoch computation over them; it is materialized lazily, only
+        // for terms whose components are actually referenced (selector
+        // arguments, symbolic date.mk applications, and the first
+        // argument of date.add/date.sub).
+        struct rep_axioms {
+            expr_ref        m_epoch_def;   // epoch value of the term
+            expr_ref        m_epoch_def2;  // second epoch equation of date.add/date.sub terms
+            expr_ref_vector m_epoch_fmls;
+            expr_ref        m_year, m_month, m_day;
+            expr_ref        m_civil_def;   // epoch computed from the components
+            expr_ref_vector m_civil_fmls;
+            rep_axioms(ast_manager& m):
+                m_epoch_def(m), m_epoch_def2(m), m_epoch_fmls(m),
+                m_year(m), m_month(m), m_day(m), m_civil_def(m), m_civil_fmls(m) {}
+        };
+
         date_util              u;
         th_rewriter            m_rw;
         svector<var_rep>       m_var2rep;
+        obj_map<expr, rep_axioms*> m_reps;
         expr_ref_vector        m_trail;
         ptr_vector<enode>      m_axiom_queue; // enodes whose defining axioms are pending
+        svector<std::pair<expr*, expr*>> m_link_queue; // date pairs whose coupling axioms are pending
         unsigned               m_qhead = 0;
+        unsigned               m_lhead = 0;
         rational               m_next_fresh;  // epoch numbers for unconstrained dates in models
 
         euf::theory_var mk_var(enode* n) override;
-        void ensure_rep(enode* n);
+        void ensure_epoch(enode* n);
+        void ensure_civil(enode* n);
+        void set_civil(theory_var v, rep_axioms const& ra);
+        rep_axioms& get_rep_axioms(app* t);
+        void build_civil(app* t, rep_axioms& ra);
+        void link_eq(expr* x, expr* y);
+        void push_link(expr* x, expr* y);
+        bool is_ground_valid_mk(app* t) const;
         enode* get_epoch(enode* n) const;
         void add_axiom(expr* e);
         void add_axioms(expr_ref_vector const& fmls);
@@ -65,6 +102,7 @@ namespace dates {
 
     public:
         solver(euf::solver& ctx);
+        ~solver() override;
 
         void asserted(sat::literal l) override {}
         sat::check_result check() override;

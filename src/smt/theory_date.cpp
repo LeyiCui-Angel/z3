@@ -22,6 +22,7 @@ Author:
 
 namespace smt {
 
+    static int s_theory_date_count = 0;
     theory_date::theory_date(context& ctx) :
         theory(ctx, ctx.get_manager().mk_family_id("date")),
         u(ctx.get_manager()),
@@ -31,6 +32,13 @@ namespace smt {
         params_ref p;
         p.set_bool("arith_lhs", true);
         m_rw.updt_params(p);
+        fprintf(stderr, "DBG theory_date ctor #%d\n", ++s_theory_date_count);
+    }
+
+    theory_date::~theory_date() {
+        for (auto const& [t, ra] : m_reps)
+            dealloc(ra);
+        m_reps.reset();
     }
 
     theory_var theory_date::mk_var(enode* n) {
@@ -83,7 +91,7 @@ namespace smt {
        date.add and date.sub terms the epoch is additionally constrained by
        the arguments of the term.
     */
-    void theory_date::ensure_rep(enode* n) {
+    void theory_date::ensure_epoch(enode* n) {
         SASSERT(u.is_date(n->get_expr()));
         theory_var v = mk_var(n);
         if (m_var2rep[v].m_epoch)
@@ -91,62 +99,159 @@ namespace smt {
         app* t = to_app(n->get_expr());
         app_ref ep(u.mk_epoch(t), m);
         ctx.internalize(ep, false);
+        m_var2rep[v].m_epoch = ctx.get_enode(ep);
+
+        if (u.is_add(t) || u.is_sub(t)) {
+            // the epoch definition refers to the epoch (or the components)
+            // of the first argument
+            arith_util& a = u.arith();
+            rational rpy, rpm;
+            if (a.is_numeral(t->get_arg(1), rpy) && rpy.is_zero() &&
+                a.is_numeral(t->get_arg(2), rpm) && rpm.is_zero())
+                ensure_epoch(ctx.get_enode(t->get_arg(0)));
+            else
+                ensure_civil(ctx.get_enode(t->get_arg(0)));
+        }
+
+        rep_axioms& ra = get_rep_axioms(t);
+        if (ra.m_epoch_def)
+            assert_axiom_eq(ep, ra.m_epoch_def);
+        if (ra.m_epoch_def2)
+            assert_axiom_eq(ep, ra.m_epoch_def2);
+        assert_axioms(ra.m_epoch_fmls);
+        if (ra.m_year) {
+            // terms whose civil layer is part of their definition
+            set_civil(v, ra);
+            if (ra.m_civil_def)
+                assert_axiom_eq(ep, ra.m_civil_def);
+            assert_axioms(ra.m_civil_fmls);
+        }
+    }
+
+    // Record the civil components on the variable, with a trail entry that
+    // clears them on backtracking: the axioms asserted alongside are undone
+    // by the backtracking as well, so a cleared field faithfully means "the
+    // civil layer is not asserted in the current scope".
+    void theory_date::set_civil(theory_var v, rep_axioms const& ra) {
+        struct reset_civil : public trail {
+            theory_date& th;
+            theory_var v;
+            reset_civil(theory_date& th, theory_var v): th(th), v(v) {}
+            void undo() override {
+                if ((unsigned)v < th.m_var2rep.size()) {
+                    var_rep& r = th.m_var2rep[v];
+                    r.m_year = nullptr;
+                    r.m_month = nullptr;
+                    r.m_day = nullptr;
+                }
+            }
+        };
         var_rep& rep = m_var2rep[v];
-        rep.m_epoch = ctx.get_enode(ep);
+        if (!rep.m_year)
+            ctx.push_trail(reset_civil(*this, v));
+        rep.m_year = ra.m_year;
+        rep.m_month = ra.m_month;
+        rep.m_day = ra.m_day;
+    }
+
+    void theory_date::ensure_civil(enode* n) {
+        ensure_epoch(n);
+        theory_var v = n->get_th_var(get_id());
+        if (m_var2rep[v].m_year)
+            return;
+        app* t = to_app(n->get_expr());
+        rep_axioms& ra = get_rep_axioms(t);
+        if (!ra.m_year)
+            build_civil(t, ra);
+        set_civil(v, ra);
+        app_ref ep(u.mk_epoch(t), m);
+        if (ra.m_civil_def)
+            assert_axiom_eq(ep, ra.m_civil_def);
+        assert_axioms(ra.m_civil_fmls);
+    }
+
+    /**
+       Build (or retrieve) the epoch-layer axioms of date term t. The
+       result is cached for the lifetime of the solver, so
+       re-internalization reuses the same fresh constants and atoms.
+    */
+    theory_date::rep_axioms& theory_date::get_rep_axioms(app* t) {
+        rep_axioms* rap = nullptr;
+        if (m_reps.find(t, rap))
+            return *rap;
+        rap = alloc(rep_axioms, m);
+        m_reps.insert(t, rap);
+        m_trail.push_back(t);
+        rep_axioms& ra = *rap;
         arith_util& a = u.arith();
 
         rational vy, vm, vd;
-        if (u.is_numeral_mk(t, vy, vm, vd)) {
+        if (u.is_numeral_mk(t, vy, vm, vd) && date_decl_plugin::is_valid_civil(vy, vm, vd)) {
             // ground fast path: the epoch and the components are numerals
-            rational en = date_decl_plugin::civil_to_days(vy, vm, vd);
-            date_decl_plugin::days_to_civil(en, vy, vm, vd);
-            rep.m_year = a.mk_numeral(vy, true);
-            rep.m_month = a.mk_numeral(vm, true);
-            rep.m_day = a.mk_numeral(vd, true);
-            m_trail.push_back(rep.m_year);
-            m_trail.push_back(rep.m_month);
-            m_trail.push_back(rep.m_day);
-            assert_axiom_eq(ep, a.mk_numeral(en, true));
-            return;
+            ra.m_year = t->get_arg(0);
+            ra.m_month = t->get_arg(1);
+            ra.m_day = t->get_arg(2);
+            ra.m_epoch_def = a.mk_numeral(date_decl_plugin::civil_to_days(vy, vm, vd), true);
+            return ra;
         }
 
-        // civil decomposition: y/mo/d are functionally determined by the epoch
-        expr_ref_vector fmls(m);
-        expr_ref y(m), mo(m), d(m);
-        expr_ref civil_epoch = u.mk_civil_rep(y, mo, d, fmls);
-        rep.m_year = y;
-        rep.m_month = mo;
-        rep.m_day = d;
-        m_trail.push_back(y);
-        m_trail.push_back(mo);
-        m_trail.push_back(d);
-        assert_axiom_eq(ep, civil_epoch);
+        if (u.is_mk(t)) {
+            // strict constructor semantics: the components are exactly the
+            // arguments; the validity bounds of the civil representation
+            // make the occurrence infeasible for invalid argument triples
+            build_civil(t, ra);
+            ra.m_civil_fmls.push_back(m.mk_eq(ra.m_year, t->get_arg(0)));
+            ra.m_civil_fmls.push_back(m.mk_eq(ra.m_month, t->get_arg(1)));
+            ra.m_civil_fmls.push_back(m.mk_eq(ra.m_day, t->get_arg(2)));
+            return ra;
+        }
 
-        if (u.is_mk(t))
-            assert_axiom_eq(ep, u.mk_epoch_of_ymd(t->get_arg(0), t->get_arg(1), t->get_arg(2), fmls));
-        else if (u.is_add(t) || u.is_sub(t)) {
-            enode* arg = ctx.get_enode(t->get_arg(0));
-            ensure_rep(arg);
-            expr_ref ep0(u.mk_epoch(t->get_arg(0)), m);
+        app_ref ep(u.mk_epoch(t), m);
+        if (u.is_add(t) || u.is_sub(t)) {
+            expr* arg = t->get_arg(0);
             rational rpy, rpm;
             if (a.is_numeral(t->get_arg(1), rpy) && rpy.is_zero() &&
                 a.is_numeral(t->get_arg(2), rpm) && rpm.is_zero()) {
                 // pure day offsets shift the epoch directly: with a zero month
                 // offset the day clamp is the identity
                 expr* pd = t->get_arg(3);
-                assert_axiom_eq(ep, u.is_sub(t) ? a.mk_sub(ep0, pd) : a.mk_add(ep0, pd));
+                expr_ref ep0(u.mk_epoch(arg), m);
+                ra.m_epoch_def = u.is_sub(t) ? a.mk_sub(ep0, pd) : a.mk_add(ep0, pd);
             }
             else {
-                var_rep const& arep = m_var2rep[arg->get_th_var(get_id())];
-                assert_axiom_eq(ep, u.mk_epoch_add(arep.m_year, arep.m_month, arep.m_day,
-                                                   t->get_arg(1), t->get_arg(2), t->get_arg(3),
-                                                   u.is_sub(t), fmls));
+                // the caller (ensure_epoch) materializes the civil layer of
+                // the argument before these axioms are asserted
+                rep_axioms& arep = get_rep_axioms(to_app(arg));
+                SASSERT(arep.m_year);
+                ra.m_epoch_def = u.mk_epoch_add(arep.m_year, arep.m_month, arep.m_day,
+                                                t->get_arg(1), t->get_arg(2), t->get_arg(3),
+                                                u.is_sub(t), ra.m_epoch_fmls);
             }
         }
-        assert_axioms(fmls);
+        // the epoch determines the date; the range bounds make the term
+        // denote a valid in-range date
+        ra.m_epoch_fmls.push_back(a.mk_le(a.mk_numeral(date_decl_plugin::min_epoch(), true), ep));
+        ra.m_epoch_fmls.push_back(a.mk_le(ep, a.mk_numeral(date_decl_plugin::max_epoch(), true)));
+        return ra;
+    }
+
+    /**
+       Materialize the civil layer of t: fresh (year, month, day) constants
+       constrained to range over valid in-range dates, together with the
+       epoch computation over them.
+    */
+    void theory_date::build_civil(app* t, rep_axioms& ra) {
+        SASSERT(!ra.m_year);
+        expr_ref y(m), mo(m), d(m);
+        u.mk_civil_consts(y, mo, d);
+        ra.m_year = y;
+        ra.m_month = mo;
+        ra.m_day = d;
+        ra.m_civil_def = u.mk_civil_rep(y, mo, d, ra.m_civil_fmls);
     }
 
     bool theory_date::internalize_term(app* term) {
+        fprintf(stderr, "DBG internalize_term\n");
         for (expr* arg : *term)
             ctx.internalize(arg, false);
 
@@ -155,7 +260,7 @@ namespace smt {
 
         if (u.is_year(term) || u.is_month(term) || u.is_day(term)) {
             enode* arg = ctx.get_enode(term->get_arg(0));
-            ensure_rep(arg);
+            ensure_civil(arg);
             var_rep const& rep = m_var2rep[arg->get_th_var(get_id())];
             if (u.is_year(term))
                 assert_axiom(m.mk_eq(term, rep.m_year));
@@ -173,8 +278,8 @@ namespace smt {
     void theory_date::internalize_cmp(app* atom) {
         expr* x = atom->get_arg(0);
         expr* y = atom->get_arg(1);
-        ensure_rep(ctx.get_enode(x));
-        ensure_rep(ctx.get_enode(y));
+        ensure_epoch(ctx.get_enode(x));
+        ensure_epoch(ctx.get_enode(y));
         arith_util& a = u.arith();
         expr_ref epx(u.mk_epoch(x), m), epy(u.mk_epoch(y), m);
         expr_ref cmp(m);
@@ -192,9 +297,87 @@ namespace smt {
         ctx.mark_as_relevant(cl);
         ctx.mk_th_axiom(get_id(), ~lit, cl);
         ctx.mk_th_axiom(get_id(), lit, ~cl);
+        if (x != y)
+            link_eq(x, y);
+    }
+
+    /**
+       Couple the equality of two date terms with their epoch and civil
+       component equalities, and add the epoch trichotomy:
+       - x = y implies equal epochs and pairwise equal components (so
+         equated dates collapse to one civil representation instead of an
+         arithmetic inversion of the epoch computation),
+       - equal components or equal epochs imply x = y (injectivity),
+       - epochs are equal or strictly ordered one way or the other, which
+         keeps ordering decisions at the level of bound propagation.
+       Invoked for date pairs that interact: compared, equated or
+       distinguished pairs.
+    */
+    void theory_date::link_eq(expr* x, expr* y) {
+        enode* nx = ctx.get_enode(x);
+        enode* ny = ctx.get_enode(y);
+        ensure_epoch(nx);
+        ensure_epoch(ny);
+        var_rep const& rx = m_var2rep[nx->get_th_var(get_id())];
+        var_rep const& ry = m_var2rep[ny->get_th_var(get_id())];
+        arith_util& a = u.arith();
+        literal eqd = mk_eq(x, y, false);
+        ctx.mark_as_relevant(eqd);
+        auto imp = [&](expr* s, expr* t) {
+            if (s == t)
+                return;
+            literal l = mk_eq(s, t, false);
+            ctx.mark_as_relevant(l);
+            ctx.mk_th_axiom(get_id(), ~eqd, l);
+        };
+        expr* epx = rx.m_epoch->get_expr();
+        expr* epy = ry.m_epoch->get_expr();
+        imp(epx, epy);
+        if (rx.m_year && ry.m_year) {
+            imp(rx.m_year, ry.m_year);
+            imp(rx.m_month, ry.m_month);
+            imp(rx.m_day, ry.m_day);
+            // equal components => equal dates (injectivity of the constructor)
+            rational r1, r2;
+            bool trivial = false;
+            literal_vector lits;
+            auto diff = [&](expr* s, expr* t) {
+                if (s == t)
+                    return;
+                if (a.is_numeral(s, r1) && a.is_numeral(t, r2) && r1 != r2)
+                    trivial = true;
+                else {
+                    literal l = mk_eq(s, t, false);
+                    ctx.mark_as_relevant(l);
+                    lits.push_back(~l);
+                }
+            };
+            diff(rx.m_year, ry.m_year);
+            diff(rx.m_month, ry.m_month);
+            diff(rx.m_day, ry.m_day);
+            if (!trivial) {
+                lits.push_back(eqd);
+                ctx.mk_th_axiom(get_id(), lits.size(), lits.data());
+            }
+        }
+        // equal epochs => equal dates, and epoch trichotomy
+        if (epx != epy) {
+            literal eqe = mk_eq(epx, epy, false);
+            ctx.mark_as_relevant(eqe);
+            ctx.mk_th_axiom(get_id(), eqd, ~eqe);
+            expr_ref lt1(a.mk_lt(epx, epy), m), lt2(a.mk_lt(epy, epx), m);
+            m_rw(lt1);
+            m_rw(lt2);
+            literal l1 = mk_literal(lt1);
+            literal l2 = mk_literal(lt2);
+            ctx.mark_as_relevant(l1);
+            ctx.mark_as_relevant(l2);
+            ctx.mk_th_axiom(get_id(), eqe, l1, l2);
+        }
     }
 
     bool theory_date::internalize_atom(app* atom, bool gate_ctx) {
+        fprintf(stderr, "DBG internalize_atom\n");
         SASSERT(u.is_lt(atom) || u.is_le(atom) || u.is_gt(atom) || u.is_ge(atom));
         for (expr* arg : *atom)
             ctx.internalize(arg, false);
@@ -207,10 +390,11 @@ namespace smt {
 
     void theory_date::apply_sort_cnstr(enode* n, sort* s) {
         if (u.is_date(s))
-            ensure_rep(n);
+            ensure_epoch(n);
     }
 
     // The epoch map is injective: equal epochs imply equal dates.
+    // Merged dates propagate their epoch and component equalities.
     void theory_date::new_eq_eh(theory_var v1, theory_var v2) {
         expr* x = get_enode(v1)->get_expr();
         expr* y = get_enode(v2)->get_expr();
@@ -222,20 +406,17 @@ namespace smt {
             ctx.mark_as_relevant(eq_d);
             ctx.mk_th_axiom(get_id(), ~eq_ep, eq_d);
         }
+        if (u.is_date(x) && u.is_date(y) && x != y)
+            link_eq(x, y);
     }
 
-    // Distinct dates have distinct epochs.
+    // Distinct dates have distinct epochs (and the full pair coupling).
     void theory_date::new_diseq_eh(theory_var v1, theory_var v2) {
         expr* x = get_enode(v1)->get_expr();
         expr* y = get_enode(v2)->get_expr();
-        if (!u.is_date(x) || !u.is_date(y))
+        if (!u.is_date(x) || !u.is_date(y) || x == y)
             return;
-        expr_ref epx(u.mk_epoch(x), m), epy(u.mk_epoch(y), m);
-        literal eq_d = mk_eq(x, y, false);
-        literal eq_ep = mk_eq(epx, epy, false);
-        ctx.mark_as_relevant(eq_d);
-        ctx.mark_as_relevant(eq_ep);
-        ctx.mk_th_axiom(get_id(), eq_d, ~eq_ep);
+        link_eq(x, y);
     }
 
     // --- model generation ------------------------------------------------

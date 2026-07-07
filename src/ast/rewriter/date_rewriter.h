@@ -21,15 +21,17 @@ Author:
 #include "ast/rewriter/rewriter_types.h"
 
 /**
-   \brief Cheap rewrite rules for date terms. Ground applications of all
-   date operations are evaluated to values (normalized date.mk terms or
-   numerals); date.gt/date.ge are normalized to date.lt/date.le.
+   \brief Cheap rewrite rules for date terms. Ground applications of the
+   date operations over valid date values are evaluated to values (valid
+   date.mk terms or numerals); date.gt/date.ge are normalized to
+   date.lt/date.le. Applications over invalid component triples are
+   never folded away: they carry validity side conditions, and the
+   theory solvers derive the infeasibility of such occurrences.
 */
 class date_rewriter {
     ast_manager& m;
     date_util    u;
 
-    br_status mk_date_mk(expr* y, expr* mo, expr* d, expr_ref& result);
     br_status mk_date_selector(decl_kind k, expr* d, expr_ref& result);
     br_status mk_date_add(bool sub, expr* d, expr* py, expr* pm, expr* pd, expr_ref& result);
     br_status mk_date_cmp(decl_kind k, expr* a, expr* b, expr_ref& result);

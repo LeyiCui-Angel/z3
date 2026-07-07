@@ -1588,10 +1588,26 @@ void cmd_context::reset(bool finalize) {
     SASSERT(!m_own_manager || !has_manager());
 }
 
+// Attach the validity side conditions of ground date.mk/date.add/date.sub
+// occurrences to the asserted formula. The conditions are plain integer
+// arithmetic over the arguments (and the selectors of the argument date),
+// so they remain intact under preprocessing even when the occurrence
+// itself is eliminated (e.g. by equation solving).
+expr* cmd_context::attach_date_side_conditions(expr* t, expr_ref& holder) {
+    family_id date_fid = m().mk_family_id("date");
+    if (!m().get_plugin(date_fid))
+        return t;
+    date_util u(m());
+    holder = u.attach_side_conditions(t);
+    return holder;
+}
+
 void cmd_context::assert_expr(expr * t) {
     scoped_rlimit no_limit(m().limit(), 0);
     if (!m_check_logic(t))
         throw cmd_exception(m_check_logic.get_last_error());
+    expr_ref t_dates(m());
+    t = attach_date_side_conditions(t, t_dates);
     m_check_sat_result = nullptr;
     m().inc_ref(t);
     m_assertions.push_back(t);
@@ -1610,6 +1626,8 @@ void cmd_context::assert_expr(symbol const & name, expr * t) {
     }
     scoped_rlimit no_limit(m().limit(), 0);
 
+    expr_ref t_dates(m());
+    t = attach_date_side_conditions(t, t_dates);
     m_check_sat_result = nullptr;
     m().inc_ref(t);
     m_assertions.push_back(t);

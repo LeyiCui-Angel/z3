@@ -23,6 +23,7 @@ Author:
 --*/
 #include "ast/date_decl_plugin.h"
 #include "ast/ast_pp.h"
+#include "ast/for_each_expr.h"
 
 date_decl_plugin::~date_decl_plugin() {
     if (m_manager)
@@ -124,10 +125,8 @@ bool date_decl_plugin::is_value(app* e) const {
         !a.is_numeral(e->get_arg(1), mo) || !mo.is_int() ||
         !a.is_numeral(e->get_arg(2), d) || !d.is_int())
         return false;
-    // values are normalized triples
-    return
-        rational::one() <= mo && mo <= rational(12) &&
-        rational::one() <= d && d <= days_in_month(y, mo);
+    // values are valid in-range triples
+    return is_valid_civil(y, mo, d);
 }
 
 bool date_decl_plugin::is_unique_value(app* e) const {
@@ -135,7 +134,7 @@ bool date_decl_plugin::is_unique_value(app* e) const {
 }
 
 bool date_decl_plugin::are_distinct(app* a, app* b) const {
-    // normalized triples are canonical representations
+    // valid triples are canonical representations
     return a != b && is_value(a) && is_value(b);
 }
 
@@ -163,6 +162,21 @@ rational date_decl_plugin::days_in_month(rational const& y, rational const& mo) 
     if (m == 2 && is_leap_year(y))
         return rational(29);
     return rational(dim[m - 1]);
+}
+
+bool date_decl_plugin::is_valid_civil(rational const& y, rational const& mo, rational const& d) {
+    return
+        rational::one() <= y && y <= rational(9999) &&
+        rational::one() <= mo && mo <= rational(12) &&
+        rational::one() <= d && d <= days_in_month(y, mo);
+}
+
+rational date_decl_plugin::min_epoch() {
+    return rational(-719162);  // civil_to_days(1, 1, 1)
+}
+
+rational date_decl_plugin::max_epoch() {
+    return rational(2932896);  // civil_to_days(9999, 12, 31)
 }
 
 void date_decl_plugin::normalize_ym(rational& y, rational& mo) {
@@ -198,16 +212,20 @@ void date_decl_plugin::days_to_civil(rational const& n, rational& y, rational& m
     y = (mo <= rational(2)) ? yy + rational::one() : yy;
 }
 
-rational date_decl_plugin::add_to_days(rational const& n, rational const& py, rational const& pm, rational const& pd) {
+bool date_decl_plugin::add_to_days_checked(rational const& n, rational const& py, rational const& pm, rational const& pd,
+                                           rational& r) {
     rational y, mo, d;
     days_to_civil(n, y, mo, d);
     rational t = y * rational(12) + mo - rational::one() + py * rational(12) + pm;
     rational y2 = div(t, rational(12));
     rational m2 = t - y2 * rational(12) + rational::one();
+    if (y2 < rational::one() || y2 > rational(9999))
+        return false;
     rational dim = days_in_month(y2, m2);
     if (d > dim)
         d = dim;
-    return civil_to_days(y2, m2, d) + pd;
+    r = civil_to_days(y2, m2, d) + pd;
+    return min_epoch() <= r && r <= max_epoch();
 }
 
 // --- date_util --------------------------------------------------------
@@ -241,6 +259,30 @@ app* date_util::mk_value_from_epoch(rational const& n) {
 
 app* date_util::mk_fresh_int(char const* prefix) {
     return m.mk_fresh_const(prefix, m_arith.mk_int());
+}
+
+expr_ref date_util::mk_month_offset(expr* mo, expr* leap01) {
+    arith_util& a = m_arith;
+    static int const moff[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    expr_ref r(a.mk_int(moff[11]), m);
+    for (unsigned i = 11; i-- > 0; )
+        r = m.mk_ite(a.mk_le(mo, a.mk_int(i + 1)), a.mk_int(moff[i]), r);
+    return expr_ref(a.mk_add(r, m.mk_ite(a.mk_ge(mo, a.mk_int(3)), leap01, a.mk_int(0))), m);
+}
+
+expr_ref date_util::mk_days_in_month(expr* mo, expr* leap01) {
+    arith_util& a = m_arith;
+    expr_ref feb(a.mk_add(a.mk_int(28), leap01), m);
+    expr_ref short_month(m.mk_or(m.mk_or(m.mk_eq(mo, a.mk_int(4)), m.mk_eq(mo, a.mk_int(6))),
+                                 m.mk_or(m.mk_eq(mo, a.mk_int(9)), m.mk_eq(mo, a.mk_int(11)))), m);
+    return expr_ref(m.mk_ite(m.mk_eq(mo, a.mk_int(2)), feb,
+                             m.mk_ite(short_month, a.mk_int(30), a.mk_int(31))), m);
+}
+
+void date_util::mk_civil_consts(expr_ref& y, expr_ref& mo, expr_ref& d) {
+    y = mk_fresh_int("date.y");
+    mo = mk_fresh_int("date.m");
+    d = mk_fresh_int("date.d");
 }
 
 expr_ref date_util::bind_int(char const* prefix, expr* def, int lo, int hi, expr_ref_vector& constraints) {
@@ -278,24 +320,6 @@ expr_ref date_util::mk_year_days(expr* y, expr_ref& leap01, expr_ref_vector& con
                              a.mk_add(c4, a.mk_sub(c400, a.mk_sub(c100, a.mk_int(1))))), m);
 }
 
-expr_ref date_util::mk_month_offset(expr* mo, expr* leap01) {
-    arith_util& a = m_arith;
-    static int const moff[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-    expr_ref r(a.mk_int(moff[11]), m);
-    for (unsigned i = 11; i-- > 0; )
-        r = m.mk_ite(a.mk_le(mo, a.mk_int(i + 1)), a.mk_int(moff[i]), r);
-    return expr_ref(a.mk_add(r, m.mk_ite(a.mk_ge(mo, a.mk_int(3)), leap01, a.mk_int(0))), m);
-}
-
-expr_ref date_util::mk_days_in_month(expr* mo, expr* leap01) {
-    arith_util& a = m_arith;
-    expr_ref feb(a.mk_add(a.mk_int(28), leap01), m);
-    expr_ref short_month(m.mk_or(m.mk_or(m.mk_eq(mo, a.mk_int(4)), m.mk_eq(mo, a.mk_int(6))),
-                                 m.mk_or(m.mk_eq(mo, a.mk_int(9)), m.mk_eq(mo, a.mk_int(11)))), m);
-    return expr_ref(m.mk_ite(m.mk_eq(mo, a.mk_int(2)), feb,
-                             m.mk_ite(short_month, a.mk_int(30), a.mk_int(31))), m);
-}
-
 void date_util::mk_norm_month(expr* months, expr_ref& y2, expr_ref& m2, expr_ref_vector& constraints) {
     arith_util& a = m_arith;
     y2 = mk_fresh_int("date.ny");
@@ -306,32 +330,20 @@ void date_util::mk_norm_month(expr* months, expr_ref& y2, expr_ref& m2, expr_ref
     constraints.push_back(a.mk_le(m2, a.mk_int(12)));
 }
 
-expr_ref date_util::mk_civil_rep(expr_ref& y, expr_ref& mo, expr_ref& d, expr_ref_vector& constraints) {
+expr_ref date_util::mk_civil_rep(expr* y, expr* mo, expr* d, expr_ref_vector& constraints) {
     arith_util& a = m_arith;
-    y = mk_fresh_int("date.y");
-    mo = mk_fresh_int("date.m");
-    d = mk_fresh_int("date.d");
     expr_ref leap01(m);
     expr_ref yd = mk_year_days(y, leap01, constraints);
     expr_ref mf = bind_int("date.moff", mk_month_offset(mo, leap01), 0, 335, constraints);
     expr_ref dim = bind_int("date.dim", mk_days_in_month(mo, leap01), 28, 31, constraints);
+    constraints.push_back(a.mk_le(a.mk_int(1), y));
+    constraints.push_back(a.mk_le(y, a.mk_int(9999)));
     constraints.push_back(a.mk_le(a.mk_int(1), mo));
     constraints.push_back(a.mk_le(mo, a.mk_int(12)));
     constraints.push_back(a.mk_le(a.mk_int(1), d));
     constraints.push_back(a.mk_le(d, dim));
     // days-before-year + days-before-month + (d - 1) - epoch offset,
     // where 719528 is the number of days from 0000-01-01 to 1970-01-01
-    return expr_ref(a.mk_add(yd, a.mk_add(mf, a.mk_sub(d, a.mk_int(719529)))), m);
-}
-
-expr_ref date_util::mk_epoch_of_ymd(expr* y, expr* mo, expr* d, expr_ref_vector& constraints) {
-    arith_util& a = m_arith;
-    // normalize the month into the year, then add d - 1 days
-    expr_ref months(a.mk_add(a.mk_mul(a.mk_int(12), y), a.mk_sub(mo, a.mk_int(1))), m);
-    expr_ref y2(m), m2(m), leap01(m);
-    mk_norm_month(months, y2, m2, constraints);
-    expr_ref yd = mk_year_days(y2, leap01, constraints);
-    expr_ref mf = bind_int("date.moff", mk_month_offset(m2, leap01), 0, 335, constraints);
     return expr_ref(a.mk_add(yd, a.mk_add(mf, a.mk_sub(d, a.mk_int(719529)))), m);
 }
 
@@ -344,6 +356,9 @@ expr_ref date_util::mk_epoch_add(expr* y0, expr* mo0, expr* d0, expr* py, expr* 
     expr_ref months(sub ? a.mk_sub(base, off) : a.mk_add(base, off), m);
     expr_ref y2(m), m2(m), leap01(m);
     mk_norm_month(months, y2, m2, constraints);
+    // the intermediate date after the month shift must be in range
+    constraints.push_back(a.mk_le(a.mk_int(1), y2));
+    constraints.push_back(a.mk_le(y2, a.mk_int(9999)));
     expr_ref yd = mk_year_days(y2, leap01, constraints);
     expr_ref mf = bind_int("date.moff", mk_month_offset(m2, leap01), 0, 335, constraints);
     expr_ref dim = bind_int("date.dim", mk_days_in_month(m2, leap01), 28, 31, constraints);
@@ -352,4 +367,105 @@ expr_ref date_util::mk_epoch_add(expr* y0, expr* mo0, expr* d0, expr* py, expr* 
     constraints.push_back(a.mk_le(d2, d0));
     expr_ref res(a.mk_add(yd, a.mk_add(mf, a.mk_sub(d2, a.mk_int(719529)))), m);
     return expr_ref(sub ? a.mk_sub(res, pd) : a.mk_add(res, pd), m);
+}
+
+// --- explicit side conditions -------------------------------------------
+//
+// Closed-form (fresh-constant free) formulations of the validity side
+// conditions carried by date.mk/date.add/date.sub occurrences. These are
+// attached to asserted formulas at the front end, so they survive any
+// preprocessing that might drop the occurrences themselves.
+
+expr_ref date_util::mk_leap01_term(expr* y) {
+    arith_util& a = m_arith;
+    expr_ref div4(m.mk_eq(a.mk_mod(y, a.mk_int(4)), a.mk_int(0)), m);
+    expr_ref div100(m.mk_eq(a.mk_mod(y, a.mk_int(100)), a.mk_int(0)), m);
+    expr_ref div400(m.mk_eq(a.mk_mod(y, a.mk_int(400)), a.mk_int(0)), m);
+    expr_ref is_leap(m.mk_and(div4, m.mk_or(m.mk_not(div100), div400)), m);
+    return expr_ref(m.mk_ite(is_leap, a.mk_int(1), a.mk_int(0)), m);
+}
+
+expr_ref date_util::mk_ground_epoch(expr* y, expr* mo, expr* d) {
+    arith_util& a = m_arith;
+    expr_ref y1(a.mk_sub(y, a.mk_int(1)), m);
+    expr_ref c4(a.mk_idiv(y1, a.mk_int(4)), m);
+    expr_ref c100(a.mk_idiv(y1, a.mk_int(100)), m);
+    expr_ref c400(a.mk_idiv(y1, a.mk_int(400)), m);
+    // days before year y (counted from 0000-01-01, plus 1) as in mk_year_days
+    expr_ref yd(a.mk_add(a.mk_mul(a.mk_int(365), y),
+                         a.mk_add(c4, a.mk_sub(c400, a.mk_sub(c100, a.mk_int(1))))), m);
+    expr_ref leap01 = mk_leap01_term(y);
+    expr_ref mf = mk_month_offset(mo, leap01);
+    return expr_ref(a.mk_add(yd, a.mk_add(mf, a.mk_sub(d, a.mk_int(719529)))), m);
+}
+
+expr_ref date_util::mk_valid_ymd(expr* y, expr* mo, expr* d) {
+    arith_util& a = m_arith;
+    expr_ref leap01 = mk_leap01_term(y);
+    expr_ref dim = mk_days_in_month(mo, leap01);
+    expr_ref_vector cs(m);
+    cs.push_back(a.mk_le(a.mk_int(1), y));
+    cs.push_back(a.mk_le(y, a.mk_int(9999)));
+    cs.push_back(a.mk_le(a.mk_int(1), mo));
+    cs.push_back(a.mk_le(mo, a.mk_int(12)));
+    cs.push_back(a.mk_le(a.mk_int(1), d));
+    cs.push_back(a.mk_le(d, dim));
+    return expr_ref(m.mk_and(cs), m);
+}
+
+bool date_util::has_guarded_date_term(expr* e) {
+    return has_guarded_date_term(m, e);
+}
+
+bool date_util::has_guarded_date_term(ast_manager& m, expr* e) {
+    family_id fid = m.mk_family_id("date");
+    decl_plugin* p = m.get_plugin(fid);
+    if (!p)
+        return false;
+    expr_ref r(e, m);
+    for (expr* t : subterms::all(r)) {
+        if (!is_app(t) || to_app(t)->get_family_id() != fid)
+            continue;
+        switch (to_app(t)->get_decl_kind()) {
+        case OP_DATE_MK:
+        case OP_DATE_ADD:
+        case OP_DATE_SUB:
+            if (!p->is_value(to_app(t)))
+                return true;
+            break;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
+void date_util::mk_occurrence_conditions(expr* f, expr_ref_vector& conds) {
+    expr_ref r(f, m);
+    for (expr* t : subterms::all(r)) {
+        if (!is_ground(t))
+            continue;
+        app* a2 = to_app(t);
+        if (is_mk(t)) {
+            rational vy, vm, vd;
+            if (is_numeral_mk(t, vy, vm, vd)) {
+                if (!date_decl_plugin::is_valid_civil(vy, vm, vd))
+                    conds.push_back(m.mk_false());
+            }
+            else
+                conds.push_back(mk_valid_ymd(a2->get_arg(0), a2->get_arg(1), a2->get_arg(2)));
+        }
+        // date.add/date.sub range conditions are enforced by the theory
+        // solvers; preprocessing is kept from dropping such occurrences by
+        // the has_guarded_date_term guards in the equation solving passes.
+    }
+}
+
+expr_ref date_util::attach_side_conditions(expr* f) {
+    expr_ref_vector conds(m);
+    mk_occurrence_conditions(f, conds);
+    if (conds.empty())
+        return expr_ref(f, m);
+    conds.push_back(f);
+    return expr_ref(m.mk_and(conds), m);
 }

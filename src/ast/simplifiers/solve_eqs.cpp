@@ -42,6 +42,7 @@ Outline of a presumably better scheme:
 #include "ast/occurs.h"
 #include "ast/recfun_decl_plugin.h"
 #include "ast/rewriter/expr_replacer.h"
+#include "ast/date_decl_plugin.h"
 #include "ast/simplifiers/solve_eqs.h"
 #include "ast/simplifiers/solve_context_eqs.h"
 #include "ast/converters/generic_model_converter.h"
@@ -75,7 +76,11 @@ namespace euf {
         m_next.resize(m_id2var.size());
 
         for (auto const& eq : eqs)
-            if (can_be_var(eq.var))
+            if (can_be_var(eq.var) && !date_util::has_guarded_date_term(m, eq.term))
+                // date.mk/date.add/date.sub occurrences carry validity side
+                // conditions on their arguments; eliminating the variable
+                // would drop the defining equation together with those
+                // conditions, which is unsound for the date theory
                 m_next[var2id(eq.var)].push_back(eq);
     }
 

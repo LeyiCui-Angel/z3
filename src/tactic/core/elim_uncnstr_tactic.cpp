@@ -25,6 +25,7 @@ Notes:
 #include "ast/array_decl_plugin.h"
 #include "ast/datatype_decl_plugin.h"
 #include "ast/seq_decl_plugin.h"
+#include "ast/date_decl_plugin.h"
 #include "tactic/core/collect_occs.h"
 #include "ast/ast_smt2_pp.h"
 #include "ast/ast_ll_pp.h"
@@ -845,7 +846,16 @@ class elim_uncnstr_tactic : public tactic {
                 if (!is_ground(args[i]))
                     return BR_FAILED; // non-ground terms are not handled.
             }
-            
+
+            for (unsigned i = 0; i < num; ++i) {
+                if (date_util::has_guarded_date_term(m(), args[i]))
+                    // date.mk/date.add/date.sub occurrences carry validity
+                    // side conditions on their arguments; inverting the
+                    // application would drop the occurrence together with
+                    // those conditions
+                    return BR_FAILED;
+            }
+
             app * u = nullptr;
             
             if (fid == m().get_basic_family_id())

@@ -113,6 +113,7 @@ eliminate:
 
 
 #include "params/smt_params_helper.hpp"
+#include "ast/date_decl_plugin.h"
 #include "ast/ast_ll_pp.h"
 #include "ast/ast_pp.h"
 #include "ast/recfun_decl_plugin.h"
@@ -159,6 +160,11 @@ void elim_unconstrained::eliminate() {
         SASSERT(!m_heap.contains(p.term()->get_id()));
         
         app* t = to_app(e);
+        if (date_util::has_guarded_date_term(m, t))
+            // date.mk/date.add/date.sub occurrences carry validity side
+            // conditions on their arguments; inverting the parent would
+            // drop the occurrence together with those conditions
+            continue;
         TRACE(elim_unconstrained, tout << "eliminating " << mk_bounded_pp(t, m) << "\n";);
         unsigned sz = m_args.size();
         for (expr* arg : *to_app(t))

@@ -519,6 +519,7 @@ public:
     void display_dimacs();
     void display_parameters(std::ostream& out);
     void reset(bool finalize = false);
+    expr* attach_date_side_conditions(expr* t, expr_ref& holder);
     void assert_expr(expr * t);
     void assert_expr(symbol const & name, expr * t);
     void push_assert_string(std::string const & s) { SASSERT(m_interactive_mode); m_assertion_strings.push_back(s); }
