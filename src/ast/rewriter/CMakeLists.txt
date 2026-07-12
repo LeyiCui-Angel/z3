@@ -9,6 +9,7 @@ z3_add_component(rewriter
     bv_bounds.cpp
     bv_elim.cpp
     bv_rewriter.cpp
+    calendar_rewriter.cpp
     cached_var_subst.cpp
     char_rewriter.cpp
     datatype_rewriter.cpp

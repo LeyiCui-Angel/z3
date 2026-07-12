@@ -32,6 +32,7 @@ Notes:
 #include "ast/pb_decl_plugin.h"
 #include "ast/fpa_decl_plugin.h"
 #include "ast/special_relations_decl_plugin.h"
+#include "ast/calendar_decl_plugin.h"
 #include "ast/ast_pp.h"
 #include "ast/pp.h"
 #include "ast/ast_smt2_pp.h"
@@ -829,6 +830,7 @@ void cmd_context::init_manager_core(bool new_manager) {
         register_plugin(symbol("fpa"),      alloc(fpa_decl_plugin), logic_has_fpa());
         register_plugin(symbol("datalog_relation"), alloc(datalog::dl_decl_plugin), !has_logic());
         register_plugin(symbol("specrels"), alloc(special_relations_decl_plugin), !has_logic());
+        register_plugin(symbol("calendar"), alloc(calendar_decl_plugin), !has_logic());
     }
     else {
         // the manager was created by an external module

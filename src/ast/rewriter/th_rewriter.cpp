@@ -28,6 +28,7 @@ Notes:
 #include "ast/rewriter/fpa_rewriter.h"
 #include "ast/rewriter/dl_rewriter.h"
 #include "ast/rewriter/pb_rewriter.h"
+#include "ast/rewriter/calendar_rewriter.h"
 #include "ast/rewriter/recfun_rewriter.h"
 #include "ast/rewriter/seq_rewriter.h"
 #include "ast/rewriter/rewriter_def.h"
@@ -52,6 +53,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
     fpa_rewriter        m_f_rw;
     dl_rewriter         m_dl_rw;
     pb_rewriter         m_pb_rw;
+    calendar_rewriter   m_cal_rw;
     seq_rewriter        m_seq_rw;
     char_rewriter       m_char_rw;
     recfun_rewriter     m_rec_rw;
@@ -224,6 +226,8 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
             return m_dl_rw.mk_app_core(f, num, args, result);
         if (fid == m_pb_rw.get_fid())
             return m_pb_rw.mk_app_core(f, num, args, result);
+        if (fid == m_cal_rw.get_fid())
+            return m_cal_rw.mk_app_core(f, num, args, result);
         if (fid == m_seq_rw.get_fid())
             return m_seq_rw.mk_app_core(f, num, args, result);
         if (fid == m_char_rw.get_fid())
@@ -881,6 +885,7 @@ struct th_rewriter_cfg : public default_rewriter_cfg {
         m_f_rw(m, p),
         m_dl_rw(m),
         m_pb_rw(m),
+        m_cal_rw(m),
         m_seq_rw(m, p),
         m_char_rw(m),
         m_rec_rw(m),

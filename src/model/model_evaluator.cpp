@@ -34,6 +34,7 @@ Revision History:
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/rewriter/var_subst.h"
 #include "ast/rewriter/recfun_rewriter.h"
+#include "ast/rewriter/calendar_rewriter.h"
 #include "model/model_smt2_pp.h"
 #include "model/model.h"
 #include "model/model_evaluator_params.hpp"
@@ -53,6 +54,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
     array_rewriter                  m_ar_rw;
     datatype_rewriter               m_dt_rw;
     pb_rewriter                     m_pb_rw;
+    calendar_rewriter               m_cal_rw;
     fpa_rewriter                    m_f_rw;
     seq_rewriter                    m_seq_rw;
     recfun_rewriter                 m_rec_rw;
@@ -81,6 +83,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
         m_ar_rw(m, p),
         m_dt_rw(m),
         m_pb_rw(m),
+        m_cal_rw(m),
         m_f_rw(m),
         m_seq_rw(m),
         m_rec_rw(m),
@@ -290,6 +293,8 @@ struct evaluator_cfg : public default_rewriter_cfg {
             st = m_dt_rw.mk_app_core(f, num, args, result);
         else if (fid == m_pb_rw.get_fid())
             st = m_pb_rw.mk_app_core(f, num, args, result);
+        else if (fid == m_cal_rw.get_fid())
+            st = m_cal_rw.mk_app_core(f, num, args, result);
         else if (fid == m_f_rw.get_fid())
             st = m_f_rw.mk_app_core(f, num, args, result);
         else if (fid == m_seq_rw.get_fid())
