@@ -55,6 +55,46 @@ namespace date {
         ctx.push(push_back_vector<expr_ref_vector>(m_rhs));
     }
 
+    /**
+       \brief Queue the year-range preference for date term e: the internal
+       indicator atom (date.year_pref e) with its defining equivalence
+       year_pref(e) <=> 1 <= year(e) <= 9999. The definition is a
+       conservative extension, so no model is excluded. The date solver
+       forces the indicator's decision phase to true (see get_phase), so
+       the search tries human-scale years before the rest of the unbounded
+       integer domain. The arithmetic solver cannot override the phase of
+       this atom the way it does for plain bound atoms (it phases those to
+       match its current, possibly extreme, simplex assignment).
+    */
+    void solver::queue_year_prefs(expr* e) {
+        rational y, mo, d;
+        if (m_util.is_concrete_date(e, y, mo, d))
+            return;
+        expr_ref lo(m), hi(m), wlo(m), whi(m);
+        m_util.mk_year_prefs(e, lo, hi);
+        queue_equiv(m_util.mk_year_pref(e), m.mk_and(lo, hi));
+        m_util.mk_year_prefs_wide(e, wlo, whi);
+        queue_equiv(m_util.mk_year_pref_wide(e), m.mk_and(wlo, whi));
+    }
+
+    /**
+       \brief Queue the redundant epoch envelope for date term e, once per
+       term. Instantiated wherever an epoch-day tower over e's selectors is
+       materialized (comparisons, date.add/date.sub, disequalities): it
+       anchors the tower linearly to the year selector, without which
+       integer branch-and-bound diverges once several towers coexist.
+    */
+    void solver::queue_envelope(expr* e) {
+        rational y, mo, d;
+        if (m_util.is_concrete_date(e, y, mo, d))
+            return;
+        if (m_enveloped.contains(e))
+            return;
+        m_enveloped.insert(e);
+        ctx.push(insert_obj_trail<expr>(m_enveloped, e));
+        queue_axiom(m_util.mk_epoch_envelope(e));
+    }
+
     void solver::assert_axiom(expr* atom, expr* rhs) {
         // normalize the asserted formula; the theory solvers (notably
         // arithmetic) expect atoms in simplified form. The date atom of an
@@ -69,6 +109,8 @@ namespace date {
             return;
         }
         sat::literal alit = mk_literal(atom);
+        if (m_util.is_year_pref(atom) && !m_pref_lits.contains(alit))
+            m_pref_lits.push_back(alit);
         if (m.is_true(r)) {
             add_unit(alit);
             return;
@@ -126,6 +168,7 @@ namespace date {
         }
         for (expr* ax : axioms)
             queue_axiom(ax);
+        queue_year_prefs(e);
     }
 
     void solver::add_op_axioms(app* term) {
@@ -142,13 +185,17 @@ namespace date {
                 concrete ? queue_no_rewrite(ax) : queue_axiom(ax);
         }
         else if (m_util.is_add(term) || m_util.is_sub(term)) {
-            bool concrete = false;
-            expr_ref ax = m_util.mk_add_axiom(term, concrete);
+            bool concrete = false, uses_epoch = false;
+            expr_ref ax = m_util.mk_add_axiom(term, concrete, uses_epoch);
             concrete ? queue_no_rewrite(ax) : queue_axiom(ax);
-            // eager epoch injectivity between the result and its base;
+            // eager selector injectivity between the result and its base;
             // resolves identities such as date.add(d,0,0,0) = d at the
             // boolean level
             queue_axiom(m_util.mk_diseq_axiom(term, term->get_arg(0)));
+            if (uses_epoch) {
+                queue_envelope(term);
+                queue_envelope(term->get_arg(0));
+            }
         }
         else if (m_util.is_lt(term) || m_util.is_le(term) || m_util.is_gt(term) || m_util.is_ge(term))
             queue_equiv(term, m_util.mk_compare_rhs(term));
@@ -239,6 +286,34 @@ namespace date {
 
     std::ostream& solver::display(std::ostream& out) const {
         return out << "theory date\n";
+    }
+
+    lbool solver::get_phase(sat::bool_var v) {
+        expr* e = ctx.bool_var2expr(v);
+        return e && m_util.is_year_pref(e) ? l_true : l_undef;
+    }
+
+    /**
+       \brief Steer the next case split to an unassigned year-range
+       preference indicator, phased true. The indicators must be decided
+       before the underlying arithmetic bound atoms: the arithmetic solver
+       phases bound atoms to match its current (possibly extreme) simplex
+       assignment, which would propagate the indicator to false through its
+       defining equivalence before it is ever decided.
+    */
+    bool solver::get_case_split(sat::bool_var& var, lbool& phase) {
+        for (sat::literal lit : m_pref_lits) {
+            sat::bool_var v = lit.var();
+            if (v >= s().num_vars() || s().value(v) != l_undef)
+                continue;
+            expr* e = ctx.bool_var2expr(v);
+            if (!e || !m_util.is_year_pref(e))
+                continue;
+            var = v;
+            phase = l_true;
+            return true;
+        }
+        return false;
     }
 
     void solver::add_value(euf::enode* n, model& mdl, expr_ref_vector& values) {

@@ -41,10 +41,17 @@ namespace smt {
         expr_ref_vector         m_atoms;
         expr_ref_vector         m_rhs;
         unsigned                m_qhead = 0;
+        // pending decision-phase preferences (year-range atoms). Never
+        // asserted: internalized with the true-first flag so model search
+        // prefers human-scale years; the negated branch keeps the full
+        // unbounded domain reachable.
+        expr_ref_vector         m_prefs;
+        unsigned                m_pref_qhead = 0;
         obj_hashtable<expr>     m_op_axiomatized;   // operator terms/atoms with instantiated axioms
         obj_hashtable<expr>     m_term_axiomatized; // date terms with validity/reconstruction axioms
         obj_hashtable<expr>     m_linked;           // terms linked to their rewriter normal form
         obj_hashtable<expr>     m_generated;        // reconstruction terms exempt from axioms
+        obj_hashtable<expr>     m_enveloped;        // date terms with an instantiated epoch envelope
         expr_ref_vector         m_generated_refs;
         date_factory*           m_factory = nullptr;
 
@@ -52,6 +59,8 @@ namespace smt {
         void queue_axiom(expr* e);
         void queue_no_rewrite(expr* e);
         void queue_equiv(expr* atom, expr* rhs);
+        void queue_year_prefs(expr* e);
+        void queue_envelope(expr* e);
         void assert_axiom(expr* atom, expr* rhs);
         void add_date_term_axioms(expr* e);
         bool link_normal_form(expr* e);
@@ -74,7 +83,7 @@ namespace smt {
 
         void new_diseq_eh(theory_var v1, theory_var v2) override;
 
-        bool can_propagate() override { return m_qhead < m_rhs.size(); }
+        bool can_propagate() override { return m_qhead < m_rhs.size() || m_pref_qhead < m_prefs.size(); }
 
         void propagate() override;
 

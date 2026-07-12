@@ -80,6 +80,7 @@ namespace smt {
         m_rewrite(m),
         m_atoms(m),
         m_rhs(m),
+        m_prefs(m),
         m_generated_refs(m) {
         // normalize arithmetic atoms into "term <= numeral" form; the
         // arithmetic solver does not handle other inequality shapes
@@ -112,6 +113,44 @@ namespace smt {
         ctx.push_trail(push_back_vector<expr_ref_vector>(m_atoms));
         m_rhs.push_back(rhs);
         ctx.push_trail(push_back_vector<expr_ref_vector>(m_rhs));
+    }
+
+    /**
+       \brief Queue the redundant epoch envelope for date term e, once per
+       term. Instantiated wherever an epoch-day tower over e's selectors is
+       materialized (comparisons, date.add/date.sub, disequalities): it
+       anchors the tower linearly to the year selector, without which
+       integer branch-and-bound diverges once several towers coexist.
+    */
+    void theory_date::queue_envelope(expr* e) {
+        rational y, mo, d;
+        if (m_util.is_concrete_date(e, y, mo, d))
+            return;
+        if (m_enveloped.contains(e))
+            return;
+        m_enveloped.insert(e);
+        ctx.push_trail(insert_obj_trail<expr>(m_enveloped, e));
+        queue_axiom(m_util.mk_epoch_envelope(e));
+    }
+
+    /**
+       \brief Queue the year-range preference atoms for date term e. They
+       are internalized (not asserted) with the true-first decision flag:
+       the search tries 1 <= year <= 9999 before falling back to the rest
+       of the unbounded integer domain, so satisfiable instances yield
+       models with human-scale years whenever such a model exists.
+    */
+    void theory_date::queue_year_prefs(expr* e) {
+        rational y, mo, d;
+        if (m_util.is_concrete_date(e, y, mo, d))
+            return;
+        expr_ref lo(m), hi(m), wlo(m), whi(m);
+        m_util.mk_year_prefs(e, lo, hi);
+        m_util.mk_year_prefs_wide(e, wlo, whi);
+        for (expr* p : { lo.get(), hi.get(), wlo.get(), whi.get() }) {
+            m_prefs.push_back(p);
+            ctx.push_trail(push_back_vector<expr_ref_vector>(m_prefs));
+        }
     }
 
     literal theory_date::mk_literal(expr* e) {
@@ -195,6 +234,7 @@ namespace smt {
         }
         for (expr* ax : axioms)
             queue_axiom(ax);
+        queue_year_prefs(e);
     }
 
     bool theory_date::internalize_atom(app * atom, bool gate_ctx) {
@@ -233,13 +273,17 @@ namespace smt {
                     concrete ? queue_no_rewrite(ax) : queue_axiom(ax);
             }
             else if (m_util.is_add(term) || m_util.is_sub(term)) {
-                bool concrete = false;
-                expr_ref ax = m_util.mk_add_axiom(term, concrete);
+                bool concrete = false, uses_epoch = false;
+                expr_ref ax = m_util.mk_add_axiom(term, concrete, uses_epoch);
                 concrete ? queue_no_rewrite(ax) : queue_axiom(ax);
-                // eager epoch injectivity between the result and its base;
-                // resolves identities such as date.add(d,0,0,0) = d at the
-                // boolean level
+                // eager selector injectivity between the result and its
+                // base; resolves identities such as date.add(d,0,0,0) = d
+                // at the boolean level
                 queue_axiom(m_util.mk_diseq_axiom(term, term->get_arg(0)));
+                if (uses_epoch) {
+                    queue_envelope(term);
+                    queue_envelope(term->get_arg(0));
+                }
             }
         }
         return true;
@@ -260,13 +304,24 @@ namespace smt {
     }
 
     void theory_date::propagate() {
-        if (m_qhead == m_rhs.size())
-            return;
-        ctx.push_trail(value_trail<unsigned>(m_qhead));
-        for (; m_qhead < m_rhs.size() && !ctx.inconsistent(); ++m_qhead) {
-            expr_ref atom(m_atoms.get(m_qhead), m);
-            expr_ref rhs(m_rhs.get(m_qhead), m);
-            assert_axiom(atom, rhs);
+        if (m_qhead < m_rhs.size()) {
+            ctx.push_trail(value_trail<unsigned>(m_qhead));
+            for (; m_qhead < m_rhs.size() && !ctx.inconsistent(); ++m_qhead) {
+                expr_ref atom(m_atoms.get(m_qhead), m);
+                expr_ref rhs(m_rhs.get(m_qhead), m);
+                assert_axiom(atom, rhs);
+            }
+        }
+        if (m_pref_qhead < m_prefs.size() && !ctx.inconsistent()) {
+            ctx.push_trail(value_trail<unsigned>(m_pref_qhead));
+            for (; m_pref_qhead < m_prefs.size() && !ctx.inconsistent(); ++m_pref_qhead) {
+                expr_ref p(m_prefs.get(m_pref_qhead), m);
+                literal l = mk_literal(p);
+                // preference only: bias the case split toward the bounded
+                // region; never asserted, so no model is excluded
+                if (!l.sign())
+                    ctx.set_true_first_flag(l.var());
+            }
         }
     }
 

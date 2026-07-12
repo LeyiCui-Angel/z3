@@ -47,7 +47,16 @@ enum date_op_kind {
     OP_DATE_LT,
     OP_DATE_LE,
     OP_DATE_GT,
-    OP_DATE_GE
+    OP_DATE_GE,
+    // internal indicator predicate date.year_pref : Date -> Bool, defined by
+    // the theory solvers as year_pref(x) <=> 1 <= date.year(x) <= 9999. Not
+    // exposed to users. Its decision phase is forced to true-first so model
+    // search prefers human-scale years; the false branch keeps the rest of
+    // the unbounded domain reachable, so no model is excluded.
+    OP_DATE_YEAR_PREF,
+    // fallback tier: year_pref_wide(x) <=> |date.year(x)| <= 999999999,
+    // biasing forced-out-of-band years to stay inside the 32-bit range
+    OP_DATE_YEAR_PREF_WIDE
 };
 
 class date_decl_plugin : public decl_plugin {
@@ -130,6 +139,8 @@ public:
     app* mk_day(expr* d)   { return m_manager.mk_app(m_fid, OP_DATE_DAY, d); }
     app* mk_lt(expr* a, expr* b) { return m_manager.mk_app(m_fid, OP_DATE_LT, a, b); }
     app* mk_le(expr* a, expr* b) { return m_manager.mk_app(m_fid, OP_DATE_LE, a, b); }
+    app* mk_year_pref(expr* d) { return m_manager.mk_app(m_fid, OP_DATE_YEAR_PREF, d); }
+    app* mk_year_pref_wide(expr* d) { return m_manager.mk_app(m_fid, OP_DATE_YEAR_PREF_WIDE, d); }
     app* mk_add(expr* d, expr* py, expr* pm, expr* pd) { expr* args[4] = { d, py, pm, pd }; return m_manager.mk_app(m_fid, OP_DATE_ADD, 4, args); }
 
     bool is_mk(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_MK); }
@@ -143,6 +154,9 @@ public:
     bool is_le(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_LE); }
     bool is_gt(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_GT); }
     bool is_ge(expr const* e)    const { return is_app_of(e, m_fid, OP_DATE_GE); }
+    bool is_year_pref(expr const* e) const {
+        return is_app_of(e, m_fid, OP_DATE_YEAR_PREF) || is_app_of(e, m_fid, OP_DATE_YEAR_PREF_WIDE);
+    }
 
     // e is (date.mk n1 n2 n3) for integer numerals n1, n2, n3 (not necessarily calendar-valid)
     bool is_concrete_date(expr const* e, rational& y, rational& mo, rational& d) const;
@@ -169,12 +183,23 @@ public:
     expr_ref mk_days_in_month_expr(expr* y, expr* mo);
     // calendar-validity of the triple (y, mo, d)
     expr_ref mk_valid_expr(expr* y, expr* mo, expr* d);
+    // decision-phase preference atoms 1 <= (date.year x) <= 9999. These are
+    // never asserted: the theory solvers internalize them and set their
+    // decision phase to true-first, so model search tries human-scale years
+    // before the unbounded remainder of the integer domain. Semantics are
+    // unchanged; only which model of a satisfiable instance is produced.
+    void mk_year_prefs(expr* x, expr_ref& lo, expr_ref& hi);
+    // fallback preference tier |year| <= 999999999 (inside 32-bit range)
+    void mk_year_prefs_wide(expr* x, expr_ref& lo, expr_ref& hi);
     // days since 1970-01-01 of the (assumed valid) triple (y, mo, d)
     expr_ref mk_epoch_expr(expr* y, expr* mo, expr* d);
     // inverse conversion: the civil triple of epoch day z
     void mk_civil_expr(expr* z, expr_ref& y, expr_ref& mo, expr_ref& d);
     // epoch term for the selector triple of date term x
     expr_ref mk_epoch_of_date(expr* x);
+    // exact linear envelope linking mk_epoch_of_date(x) to date.year(x);
+    // redundant fact instantiated wherever an epoch tower is materialized
+    expr_ref mk_epoch_envelope(expr* x);
 
     /**
        Axioms asserted for every term x of sort Date:
@@ -196,10 +221,16 @@ public:
     // day-offset result t and its base d; true when pd is not a numeral
     expr_ref mk_year_bracket(expr* t, expr* d, expr* pd);
 
-    // for a = (date.add d py pm pd) or (date.sub d py pm pd): epoch equation
-    // for the result. Sets concrete (with the same meaning as for
-    // mk_constructor_axioms) when all inputs were evaluated.
-    expr_ref mk_add_axiom(app* a, bool& concrete);
+    // bounded unrolling of the day-carry loop for a numeral day offset vd;
+    // pure ite/linear encoding of date.add(d, 0, 0, vd) with no epoch towers
+    expr_ref mk_day_carry_unrolled(app* t, expr* d, rational const& vd);
+
+    // for a = (date.add d py pm pd) or (date.sub d py pm pd): the defining
+    // axiom for the result. Sets concrete (with the same meaning as for
+    // mk_constructor_axioms) when all inputs were evaluated; sets uses_epoch
+    // when the returned encoding materializes epoch-day towers (callers then
+    // instantiate the epoch envelope for the result and base terms).
+    expr_ref mk_add_axiom(app* a, bool& concrete, bool& uses_epoch);
 
     // for an atom p in {date.lt, date.le, date.gt, date.ge}: the epoch
     // comparison that p is equivalent to; on valid dates the epoch order

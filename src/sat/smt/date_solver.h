@@ -42,11 +42,15 @@ namespace date {
         obj_hashtable<expr>     m_term_axiomatized; // date terms with validity/reconstruction axioms
         obj_hashtable<expr>     m_linked;           // terms linked to their rewriter normal form
         obj_hashtable<expr>     m_generated;        // reconstruction terms exempt from axioms
+        obj_hashtable<expr>     m_enveloped;        // date terms with an instantiated epoch envelope
         expr_ref_vector         m_generated_refs;
+        sat::literal_vector     m_pref_lits;        // year-range preference indicator literals
 
         void queue_axiom(expr* e);
         void queue_no_rewrite(expr* e);
         void queue_equiv(expr* atom, expr* rhs);
+        void queue_year_prefs(expr* e);
+        void queue_envelope(expr* e);
         void assert_axiom(expr* atom, expr* rhs);
         void add_date_term_axioms(expr* e);
         void add_op_axioms(app* term);
@@ -82,6 +86,14 @@ namespace date {
         sat::check_result check() override {
             return m_qhead < m_rhs.size() ? sat::check_result::CR_CONTINUE : sat::check_result::CR_DONE;
         }
+
+        // force the year-range preference indicators (date.year_pref) to be
+        // decided true first: the search tries 1 <= year <= 9999 before the
+        // rest of the unbounded integer domain, so models use human-scale
+        // years whenever the instance allows them
+        lbool get_phase(sat::bool_var v) override;
+
+        bool get_case_split(sat::bool_var& var, lbool& phase) override;
 
         std::ostream& display(std::ostream& out) const override;
 
