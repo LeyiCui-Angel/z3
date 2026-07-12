@@ -15,6 +15,7 @@ z3_add_component(ast
     ast_translation.cpp
     ast_util.cpp
     bv_decl_plugin.cpp
+    calendar_decl_plugin.cpp
     char_decl_plugin.cpp
     cost_evaluator.cpp
     datatype_decl_plugin.cpp

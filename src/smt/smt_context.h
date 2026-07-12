@@ -98,6 +98,7 @@ namespace smt {
         smt_params &                m_fparams;
         params_ref                  m_params;
         ::statistics                m_aux_stats;
+        family_id                   m_calendar_fid;
         setup                       m_setup;
         unsigned                    m_relevancy_lvl;
         timer                       m_timer;

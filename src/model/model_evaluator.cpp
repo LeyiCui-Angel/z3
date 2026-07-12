@@ -34,6 +34,7 @@ Revision History:
 #include "ast/rewriter/rewriter_def.h"
 #include "ast/rewriter/var_subst.h"
 #include "ast/rewriter/recfun_rewriter.h"
+#include "ast/rewriter/calendar_rewriter.h"
 #include "model/model_smt2_pp.h"
 #include "model/model.h"
 #include "model/model_evaluator_params.hpp"
@@ -56,6 +57,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
     fpa_rewriter                    m_f_rw;
     seq_rewriter                    m_seq_rw;
     recfun_rewriter                 m_rec_rw;
+    calendar_rewriter               m_cal_rw;
     array_util                      m_ar;
     arith_util                      m_au;
     fpa_util                        m_fpau;
@@ -84,6 +86,7 @@ struct evaluator_cfg : public default_rewriter_cfg {
         m_f_rw(m),
         m_seq_rw(m),
         m_rec_rw(m),
+        m_cal_rw(m),
         m_ar(m),
         m_au(m),
         m_fpau(m),
@@ -296,6 +299,8 @@ struct evaluator_cfg : public default_rewriter_cfg {
             st = m_seq_rw.mk_app_core(f, num, args, result);
         else if (fid == m_rec_rw.get_fid())
             st = m_rec_rw.mk_app_core(f, num, args, result);
+        else if (fid == m_cal_rw.get_fid())
+            st = m_cal_rw.mk_app_core(f, num, args, result);
         else if (fid == m.get_label_family_id() && num == 1) {
             result = args[0];
             st = BR_DONE;

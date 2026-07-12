@@ -52,6 +52,7 @@ namespace smt {
         m(m),
         m_fparams(p),
         m_params(_p),
+        m_calendar_fid(m.mk_family_id("calendar")),
         m_setup(*this, p),
         m_relevancy_lvl(m_fparams.m_relevancy_lvl),
         m_asserted_formulas(m, p, _p),

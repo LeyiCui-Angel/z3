@@ -370,6 +370,13 @@ namespace smt {
         if (is_var(n)) {
             throw default_exception("Formulas should not contain unbound variables");
         }
+        if (is_app(n) && to_app(n)->get_family_id() == m_calendar_fid) {
+            // Calendar operators are eliminated by th_rewriter (see
+            // ast/rewriter/calendar_rewriter.cpp). If one reaches the smt core
+            // (e.g. because preprocessing was disabled), treating it as an
+            // uninterpreted function would be unsound, so reject the formula.
+            throw default_exception("calendar operators are only supported when preprocessing is enabled");
+        }
         if (m.is_bool(n)) {
             SASSERT(is_quantifier(n) || is_app(n));
             internalize_formula(n, gate_ctx);
