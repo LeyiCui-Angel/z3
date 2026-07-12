@@ -155,6 +155,7 @@ int main(int argc, char ** argv) {
     TST(rational);
     TST(inf_rational);
     TST(ast);
+    TST(calendar);
     TST(optional);
     TST(bit_vector);
     TST(fixed_bit_vector);
