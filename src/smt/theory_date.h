@@ -10,20 +10,36 @@ Abstract:
     Theory solver for calendar dates (legacy SMT core).
 
     The solver reduces all date operations to integer arithmetic over
-    the internal injection date.epoch! : Date -> Int:
+    the internal injection date.epoch! : Date -> Int. The encoding is
+    purely *forward* (relational): where the components of a date are
+    needed, its selector terms (date.year d) etc. serve as the component
+    variables, constrained by the component axioms
+
+        1 <= month(d) <= 12,  1 <= day(d) <= days-in-month(year(d), month(d)),
+        epoch(d) = days-from-civil(year(d), month(d), day(d))
+
+    (asserted on demand, per Date term). The operations become
 
     - (date.mk y m d)        1 <= m <= 12, 1 <= d <= days-in-month(y, m),
-                             epoch(t) = days-from-civil(y, m, d)
-    - (date.add d py pm pd)  epoch(t) = epoch-of-add(epoch(d), py, pm, pd)
-    - (date.sub d py pm pd)  epoch(t) = epoch-of-add(epoch(d), -py, -pm, -pd)
-    - date.year/month/day    t = component-of-epoch(epoch(d))
+                             epoch(t) = days-from-civil(y, m, d),
+                             year(t) = y, month(t) = m, day(t) = d
+    - (date.add d py pm pd)  epoch(t) = epoch-of-add over epoch(d) and
+                             the components of d (plus component axioms
+                             for d); pure day shifts reduce to
+                             epoch(t) = epoch(d) + pd
+    - (date.sub d py pm pd)  date.add with negated offsets
+    - date.year/month/day    component axioms for d; the selector term
+                             itself is the component
     - date.lt/le/gt/ge       atom <=> epoch order
 
     All right-hand sides are linear integer arithmetic with ite and
-    div/mod by constants. In addition, for every Date term d the
-    tautology (or (<= epoch(d) 0) (>= epoch(d) 0)) is asserted so that
-    epoch(d) is registered with the arithmetic solver and always has a
-    value in the arithmetic model.
+    div/mod by small constants (4, 100, 400, 12). The inverse
+    civil-of-epoch map is never encoded symbolically: recovering
+    components from an epoch is left to the integer solver's search over
+    the bounded component variables. In addition, for every Date term d
+    the tautology (or (<= epoch(d) 0) (>= epoch(d) 0)) is asserted so
+    that epoch(d) is registered with the arithmetic solver and always
+    has a value in the arithmetic model.
 
     The axioms are queued during internalization and flushed in
     propagate(), because internalization of date terms can be nested
@@ -56,7 +72,8 @@ namespace smt {
             AX_CMP,         // e1 is a comparison atom to axiomatize
             AX_EPOCH_BOUND, // e1 is a Date term whose epoch is registered with arith
             AX_INJ,         // e1, e2 are Date terms: epoch(e1) = epoch(e2) => e1 = e2
-            AX_CIVIL,       // e1 is a Date term: epoch = days-from-civil(components)
+            AX_COMPONENTS,  // e1 is a Date term: selector bounds and
+                            // epoch = days-from-civil(selectors)
             AX_MK,          // e1 is a date.mk term: validity constraints + definition
             AX_MKINJ        // e1 is a Date term whose class contains date.mk terms:
                             // equal dates have equal components
@@ -73,6 +90,11 @@ namespace smt {
         expr_ref_vector     m_e1s, m_e2s;
         unsigned            m_qhead { 0 };
 
+        // last epoch value for which component lemmas were emitted, per
+        // date term; a heuristic damper for propagate_components (not
+        // backtracked, safe because the lemmas are redundant)
+        obj_map<expr, rational> m_emitted;
+
         void push_axiom(axiom_kind k, expr* e1, expr* e2 = nullptr);
         bool flush_axioms();
         void assert_eq_axiom(expr* lhs, expr* rhs);
@@ -80,13 +102,14 @@ namespace smt {
         void assert_cmp_axiom(app* atom);
         void assert_epoch_bound(expr* d);
         void assert_injectivity(expr* d1, expr* d2);
-        void assert_civil_identity(expr* d);
+        void assert_component_axioms(expr* d);
         void assert_mk_axioms(app* mk);
         void assert_mk_injectivity(expr* e);
 
         void ensure_var(enode* n);
         bool epoch_value(enode* n, rational& val);
         bool final_check();
+        bool propagate_components();
 
     public:
         theory_date(context& ctx);

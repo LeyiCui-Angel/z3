@@ -124,11 +124,9 @@ class date_util {
     expr_ref mk_num(rational const& r);
     expr_ref mk_idiv(expr* x, int c);
     expr_ref mk_imod(expr* x, int c);
-    struct civil_expr {
-        expr_ref y, m, d;
-        civil_expr(ast_manager& mgr): y(mgr), m(mgr), d(mgr) {}
-    };
-    void mk_civil_of_epoch(expr* z, civil_expr& c);
+    // day-of-year offset of the first day of month mo (Hinnant's
+    // (153*mp+2)/5 table folded into an ite table over mo in [1,12])
+    expr_ref mk_month_offset(expr* mo);
 
 public:
     date_util(ast_manager& m):
@@ -160,6 +158,15 @@ public:
 
     app* mk_mk(expr* y, expr* mo, expr* d);
     app* mk_epoch(expr* d);
+    app* mk_year(expr* d);
+    app* mk_month(expr* d);
+    app* mk_day(expr* d);
+
+    /**
+       \brief Negation of an Int term; numerals are negated in place so
+       that offset fast paths can recognize them.
+    */
+    expr_ref mk_ineg(expr* e);
 
     /**
        \brief Date value from an epoch day number: (date.mk y m d) with
@@ -195,20 +202,30 @@ public:
 
     // ------------------------------------------------------------------
     // symbolic encodings of the calendar functions over Int terms.
-    // All use only linear arithmetic, ite, and div/mod by constants.
+    // All use only linear arithmetic, ite, and div/mod by small
+    // constants (4, 100, 400 on the shifted year; 12 on month totals).
+    // The theory solvers use a purely *forward* (relational) encoding:
+    // the components of a date are represented by its selector terms,
+    // constrained to a valid civil triple whose days-from-civil image is
+    // the date's epoch. The inverse civil-of-epoch direction is never
+    // encoded symbolically -- recovering components from an epoch is
+    // left to the integer solver's search over the (tightly bounded)
+    // component variables, which is far cheaper than the div towers by
+    // 146097/36524/1460 that a symbolic inverse requires.
 
     // number of days in month mo of year y, for mo in [1,12]
     expr_ref mk_days_in_month(expr* y, expr* mo);
     // epoch of the civil triple (y, mo, d) for mo in [1,12]
     expr_ref mk_days_from_civil(expr* y, expr* mo, expr* d);
-    // components of a date given by its epoch day
-    expr_ref mk_year_of_epoch(expr* z);
-    expr_ref mk_month_of_epoch(expr* z);
-    expr_ref mk_day_of_epoch(expr* z);
-    // epoch of (date.add d py pm pd) given z = epoch of d
-    expr_ref mk_epoch_of_add(expr* z, expr* py, expr* pm, expr* pd);
-    // days-from-civil over the components of z: equal to z for every z.
-    // Providing this identity as an axiom lets the solvers derive
-    // injectivity of the component map by congruence.
-    expr_ref mk_civil_roundtrip(expr* z);
+    // absolute month count 12*y + mo of a civil pair; month arithmetic
+    // is linear on this view, and mo in [1,12] makes the decomposition
+    // unique, so the solvers never need div/mod by 12
+    expr_ref mk_month_total(expr* y, expr* mo);
+    // dd clamped to the length of month mo of year y (end-of-month rule)
+    expr_ref mk_clamped_day(expr* dd, expr* y, expr* mo);
+    // true if py and pm are numerals denoting a zero month shift, so
+    // date.add reduces to a pure day shift on epochs
+    bool is_zero_month_shift(expr* py, expr* pm) const;
+    // true if e is the numeral zero
+    bool is_zero(expr* e) const;
 };

@@ -174,6 +174,25 @@ app* date_util::mk_epoch(expr* d) {
     return m.mk_app(m_fid, OP_DATE_EPOCH, 1, &d);
 }
 
+app* date_util::mk_year(expr* d) {
+    return m.mk_app(m_fid, OP_DATE_YEAR, 1, &d);
+}
+
+app* date_util::mk_month(expr* d) {
+    return m.mk_app(m_fid, OP_DATE_MONTH, 1, &d);
+}
+
+app* date_util::mk_day(expr* d) {
+    return m.mk_app(m_fid, OP_DATE_DAY, 1, &d);
+}
+
+expr_ref date_util::mk_ineg(expr* e) {
+    rational r;
+    if (m_arith.is_numeral(e, r))
+        return expr_ref(m_arith.mk_int(-r), m);
+    return expr_ref(m_arith.mk_uminus(e), m);
+}
+
 app* date_util::mk_date_value(rational const& epoch) {
     rational y, mo, d;
     civil_of_epoch(epoch, y, mo, d);
@@ -288,37 +307,33 @@ expr_ref date_util::mk_imod(expr* x, int c) {
     return expr_ref(m_arith.mk_mod(x, m_arith.mk_int(c)), m);
 }
 
-expr_ref date_util::mk_days_from_civil(expr* y, expr* mo, expr* d) {
+expr_ref date_util::mk_month_offset(expr* mo) {
+    // day-of-year of the first day of month mo relative to March 1:
+    // Hinnant's (153*mp + 2)/5 with mp = (mo + 9) mod 12. The div form
+    // is kept (rather than a 12-way ite table) because its LP relaxation
+    // is tight: moff ~ 30.6*mp pins the month during model search, where
+    // an ite table costs blind Boolean case splits.
     arith_util& a = m_arith;
-    expr_ref yp(m.mk_ite(a.mk_le(mo, mk_num(2)), a.mk_sub(y, mk_num(1)), y), m);
-    expr_ref era = mk_idiv(yp, 400);
-    expr_ref yoe(a.mk_sub(yp, a.mk_mul(mk_num(400), era)), m);
-    expr_ref mp(a.mk_add(mo, m.mk_ite(a.mk_ge(mo, mk_num(3)), mk_num(-3), mk_num(9))), m);
-    expr_ref doy(a.mk_add(mk_idiv(a.mk_add(a.mk_mul(mk_num(153), mp), mk_num(2)), 5),
-                          a.mk_sub(d, mk_num(1))), m);
-    expr_ref doe(a.mk_add(a.mk_mul(mk_num(365), yoe),
-                          a.mk_sub(mk_idiv(yoe, 4), mk_idiv(yoe, 100)),
-                          doy), m);
-    return expr_ref(a.mk_add(a.mk_mul(mk_num(146097), era), doe, mk_num(-719468)), m);
+    expr_ref mp(a.mk_add(mo, m.mk_ite(a.mk_le(mo, mk_num(2)), mk_num(9), mk_num(-3))), m);
+    return mk_idiv(a.mk_add(a.mk_mul(mk_num(153), mp), mk_num(2)), 5);
 }
 
-void date_util::mk_civil_of_epoch(expr* z, civil_expr& c) {
+expr_ref date_util::mk_days_from_civil(expr* y, expr* mo, expr* d) {
     arith_util& a = m_arith;
-    expr_ref zp(a.mk_add(z, mk_num(719468)), m);
-    expr_ref era = mk_idiv(zp, 146097);
-    expr_ref doe(a.mk_sub(zp, a.mk_mul(mk_num(146097), era)), m);
-    expr_ref yoe = mk_idiv(a.mk_add(doe,
-                                    a.mk_sub(mk_idiv(doe, 36524),
-                                             a.mk_add(mk_idiv(doe, 1460), mk_idiv(doe, 146096)))),
-                           365);
-    expr_ref y1(a.mk_add(yoe, a.mk_mul(mk_num(400), era)), m);
-    expr_ref doy(a.mk_sub(doe, a.mk_add(a.mk_mul(mk_num(365), yoe),
-                                        a.mk_sub(mk_idiv(yoe, 4), mk_idiv(yoe, 100)))), m);
-    expr_ref mp = mk_idiv(a.mk_add(a.mk_mul(mk_num(5), doy), mk_num(2)), 153);
-    c.d = a.mk_add(a.mk_sub(doy, mk_idiv(a.mk_add(a.mk_mul(mk_num(153), mp), mk_num(2)), 5)),
-                   mk_num(1));
-    c.m = a.mk_add(mp, m.mk_ite(a.mk_lt(mp, mk_num(10)), mk_num(3), mk_num(-9)));
-    c.y = a.mk_add(y1, m.mk_ite(a.mk_le(c.m, mk_num(2)), mk_num(1), mk_num(0)));
+    // Hinnant's algorithm with the era/year-of-era split eliminated:
+    // 146097*era + 365*yoe + yoe/4 - yoe/100 with era = yp/400 and
+    // yoe = yp - 400*era collapses to 365*yp + yp/4 - yp/100 + yp/400
+    // (the divisions are Euclidean = floor, the divisors are positive).
+    // Only three div terms remain, all over the same shifted year.
+    expr_ref yp(m.mk_ite(a.mk_le(mo, mk_num(2)), a.mk_sub(y, mk_num(1)), y), m);
+    expr_ref y365(a.mk_mul(mk_num(365), yp), m);
+    expr_ref d4 = mk_idiv(yp, 4);
+    expr_ref nd100(a.mk_mul(mk_num(-1), mk_idiv(yp, 100)), m);
+    expr_ref d400 = mk_idiv(yp, 400);
+    expr_ref moff = mk_month_offset(mo);
+    expr_ref c = mk_num(-719469); // -719468 for the epoch shift, -1 for d starting at 1
+    expr* args[7] = { y365, d4, nd100, d400, moff, d, c };
+    return expr_ref(a.mk_add(7, args), m);
 }
 
 expr_ref date_util::mk_days_in_month(expr* y, expr* mo) {
@@ -332,41 +347,30 @@ expr_ref date_util::mk_days_in_month(expr* y, expr* mo) {
                              m.mk_ite(short_month, mk_num(30), mk_num(31))), m);
 }
 
-expr_ref date_util::mk_year_of_epoch(expr* z) {
-    civil_expr c(m);
-    mk_civil_of_epoch(z, c);
-    return c.y;
+bool date_util::is_zero_month_shift(expr* py, expr* pm) const {
+    arith_util& a = const_cast<date_util*>(this)->m_arith;
+    rational ry, rm;
+    return a.is_extended_numeral(py, ry) && ry.is_zero() &&
+           a.is_extended_numeral(pm, rm) && rm.is_zero();
 }
 
-expr_ref date_util::mk_month_of_epoch(expr* z) {
-    civil_expr c(m);
-    mk_civil_of_epoch(z, c);
-    return c.m;
+bool date_util::is_zero(expr* e) const {
+    arith_util& a = const_cast<date_util*>(this)->m_arith;
+    rational r;
+    return a.is_extended_numeral(e, r) && r.is_zero();
 }
 
-expr_ref date_util::mk_day_of_epoch(expr* z) {
-    civil_expr c(m);
-    mk_civil_of_epoch(z, c);
-    return c.d;
+expr_ref date_util::mk_month_total(expr* y, expr* mo) {
+    return expr_ref(m_arith.mk_add(m_arith.mk_mul(mk_num(12), y), mo), m);
 }
 
-expr_ref date_util::mk_civil_roundtrip(expr* z) {
-    civil_expr c(m);
-    mk_civil_of_epoch(z, c);
-    return mk_days_from_civil(c.y, c.m, c.d);
-}
-
-expr_ref date_util::mk_epoch_of_add(expr* z, expr* py, expr* pm, expr* pd) {
+expr_ref date_util::mk_clamped_day(expr* dd, expr* y, expr* mo) {
     arith_util& a = m_arith;
-    civil_expr c(m);
-    mk_civil_of_epoch(z, c);
-    expr_ref months(a.mk_mul(mk_num(12), a.mk_add(c.y, py)), m);
-    expr_ref neg1 = mk_num(-1);
-    expr* mo_args[4] = { months, c.m, neg1, pm };
-    expr_ref mo_total(a.mk_add(4, mo_args), m);
-    expr_ref yy = mk_idiv(mo_total, 12);
-    expr_ref mm(a.mk_add(mk_imod(mo_total, 12), mk_num(1)), m);
-    expr_ref len = mk_days_in_month(yy, mm);
-    expr_ref dd(m.mk_ite(a.mk_le(c.d, len), c.d, len), m);
-    return expr_ref(a.mk_add(mk_days_from_civil(yy, mm, dd), pd), m);
+    expr_ref len = mk_days_in_month(y, mo);
+    // clamp condition in bound form (term <= numeral): with len an ite
+    // term, (<= dd len) would be normalized with the ite on the
+    // right-hand side, a shape the legacy arithmetic solver does not
+    // internalize (it lands in m_not_handled and final check gives up)
+    expr_ref no_clamp(a.mk_le(a.mk_sub(dd, len), mk_num(0)), m);
+    return expr_ref(m.mk_ite(no_clamp, dd, len), m);
 }

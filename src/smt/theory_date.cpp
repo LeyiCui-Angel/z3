@@ -29,6 +29,14 @@ namespace smt {
         m_avalue(m),
         m_e1s(m),
         m_e2s(m) {
+        // normalize every inequality to bound form (poly <= numeral):
+        // theory axioms bypass the preprocessing pipeline, and
+        // theory_lra::internalize_atom treats any other inequality shape
+        // (e.g. an ite moved to the right-hand side) as unsupported,
+        // which turns final check into FC_GIVEUP
+        params_ref p;
+        p.set_bool("arith_ineq_lhs", true);
+        m_rw.updt_params(p);
     }
 
     void theory_date::ensure_var(enode* n) {
@@ -76,8 +84,8 @@ namespace smt {
             case AX_INJ:
                 assert_injectivity(m_e1s.get(i), m_e2s.get(i));
                 break;
-            case AX_CIVIL:
-                assert_civil_identity(m_e1s.get(i));
+            case AX_COMPONENTS:
+                assert_component_axioms(m_e1s.get(i));
                 break;
             case AX_MK:
                 assert_mk_axioms(to_app(m_e1s.get(i)));
@@ -184,31 +192,25 @@ namespace smt {
     }
 
     /**
-       \brief Assert epoch(d) = days-from-civil(year, month, day of epoch(d))
-       together with range bounds on the components. These are valid facts
-       of the calendar bijection; providing them as axioms lets equalities
-       between components propagate to equalities between epochs by
-       congruence, instead of requiring the arithmetic solver to re-derive
-       injectivity of the calendar map.
+       \brief Component axioms for a Date term: its selector terms form a
+       valid civil triple whose days-from-civil image is its epoch. The
+       selectors act as the component variables of the relational
+       encoding; the inverse civil-of-epoch direction is never encoded,
+       the integer solver searches over the bounded components instead.
     */
-    void theory_date::assert_civil_identity(expr* d) {
+    void theory_date::assert_component_axioms(expr* d) {
         if (!ctx.e_internalized(d))
             return;
+        expr_ref y(u.mk_year(d), m);
+        expr_ref mo(u.mk_month(d), m);
+        expr_ref dd(u.mk_day(d), m);
+        assert_unit_axiom(a.mk_ge(mo, a.mk_int(1)));
+        assert_unit_axiom(a.mk_le(mo, a.mk_int(12)));
+        assert_unit_axiom(a.mk_ge(dd, a.mk_int(1)));
+        // bound form (term <= numeral): days-in-month is an ite term
+        assert_unit_axiom(a.mk_le(a.mk_sub(dd, u.mk_days_in_month(y, mo)), a.mk_int(0)));
         expr_ref ep(u.mk_epoch(d), m);
-        assert_eq_axiom(ep, u.mk_civil_roundtrip(ep));
-        expr_ref mo = u.mk_month_of_epoch(ep);
-        expr_ref dd = u.mk_day_of_epoch(ep);
-        expr_ref one(a.mk_int(1), m);
-        literal lits[4] = {
-            mk_literal(a.mk_ge(mo, one)),
-            mk_literal(a.mk_le(mo, a.mk_int(12))),
-            mk_literal(a.mk_ge(dd, one)),
-            mk_literal(a.mk_le(dd, a.mk_int(31)))
-        };
-        for (literal l : lits) {
-            ctx.mark_as_relevant(l);
-            ctx.mk_th_axiom(get_id(), 1, &l);
-        }
+        assert_eq_axiom(ep, u.mk_days_from_civil(y, mo, dd));
     }
 
     /**
@@ -232,16 +234,16 @@ namespace smt {
         assert_unit_axiom(a.mk_le(a.mk_sub(d, u.mk_days_in_month(y, mo)), a.mk_int(0)));
         expr_ref ep(u.mk_epoch(mk), m);
         assert_eq_axiom(ep, u.mk_days_from_civil(y, mo, d));
-        // inverse direction, entailed by the definition and validity:
-        // the components of the epoch are the constructor arguments.
-        // This lets the arithmetic solver recover symbolic arguments
-        // from a known epoch instead of inverting days-from-civil.
-        if (!a.is_numeral(y))
-            assert_eq_axiom(y, u.mk_year_of_epoch(ep));
-        if (!a.is_numeral(mo))
-            assert_eq_axiom(mo, u.mk_month_of_epoch(ep));
-        if (!a.is_numeral(d))
-            assert_eq_axiom(d, u.mk_day_of_epoch(ep));
+        // the components of the constructed date are the constructor
+        // arguments. For ground constructors the definition above is
+        // already a fixed epoch and the selector equalities are folded
+        // by the rewriter wherever selectors occur.
+        rational ry, rmo, rd;
+        if (!u.is_numeral_mk(mk, ry, rmo, rd)) {
+            assert_eq_axiom(y, u.mk_year(mk));
+            assert_eq_axiom(mo, u.mk_month(mk));
+            assert_eq_axiom(d, u.mk_day(mk));
+        }
         // constructor-selector roundtrip fast-path
         if (u.is_year(y) && u.is_month(mo) && u.is_day(d)) {
             expr* x = to_app(y)->get_arg(0);
@@ -307,37 +309,70 @@ namespace smt {
         case OP_DATE_MK:
             push_axiom(AX_MK, term);
             break;
-        case OP_DATE_ADD: {
-            expr_ref ep(u.mk_epoch(term->get_arg(0)), m);
-            push_axiom(AX_EQ, u.mk_epoch(term),
-                       u.mk_epoch_of_add(ep, term->get_arg(1), term->get_arg(2), term->get_arg(3)));
-            break;
-        }
+        case OP_DATE_ADD:
         case OP_DATE_SUB: {
             // date.sub is date.add with negated offsets
-            expr_ref ep(u.mk_epoch(term->get_arg(0)), m);
-            expr_ref npy(a.mk_uminus(term->get_arg(1)), m);
-            expr_ref npm(a.mk_uminus(term->get_arg(2)), m);
-            expr_ref npd(a.mk_uminus(term->get_arg(3)), m);
-            push_axiom(AX_EQ, u.mk_epoch(term), u.mk_epoch_of_add(ep, npy, npm, npd));
+            bool is_sub = term->get_decl_kind() == OP_DATE_SUB;
+            expr* b = term->get_arg(0);
+            expr_ref py(term->get_arg(1), m), pm(term->get_arg(2), m), pd(term->get_arg(3), m);
+            if (is_sub) {
+                py = u.mk_ineg(py);
+                pm = u.mk_ineg(pm);
+                pd = u.mk_ineg(pd);
+            }
+            if (u.is_zero_month_shift(py, pm)) {
+                // pure day shift: the base date is a valid date, so the
+                // month step and the day clamp are the identity and the
+                // epoch shifts exactly
+                push_axiom(AX_EQ, u.mk_epoch(term), a.mk_add(u.mk_epoch(b), pd));
+            }
+            else if (u.is_zero(pd)) {
+                // pure month shift: the components of the result are
+                // definable without division. On the absolute month
+                // count 12*y + mo the shift is linear, and the bounds
+                // 1 <= month <= 12 from the component axioms make the
+                // year/month decomposition unique; the day is the base
+                // day clamped to the target month length. The epoch
+                // follows from the component axioms of the result.
+                push_axiom(AX_COMPONENTS, term);
+                if (!u.is_mk(b))
+                    push_axiom(AX_COMPONENTS, b);
+                expr_ref yb(u.mk_year(b), m), mb(u.mk_month(b), m), db(u.mk_day(b), m);
+                expr_ref yt(u.mk_year(term), m), mt(u.mk_month(term), m);
+                expr_ref shift(a.mk_add(a.mk_mul(a.mk_int(12), py), pm), m);
+                push_axiom(AX_EQ, u.mk_month_total(yt, mt),
+                           a.mk_add(u.mk_month_total(yb, mb), shift));
+                push_axiom(AX_EQ, u.mk_day(term), u.mk_clamped_day(db, yt, mt));
+            }
+            else {
+                // general shift: factor through the pure month shift,
+                // then shift days exactly on epochs
+                expr_ref zero(a.mk_int(0), m);
+                expr* args[4] = { b, py, pm, zero };
+                app_ref mid(m.mk_app(get_family_id(), OP_DATE_ADD, 4, args), m);
+                push_axiom(AX_EQ, u.mk_epoch(term), a.mk_add(u.mk_epoch(mid), pd));
+            }
             break;
         }
-        case OP_DATE_YEAR: {
-            expr_ref ep(u.mk_epoch(term->get_arg(0)), m);
-            push_axiom(AX_EQ, term, u.mk_year_of_epoch(ep));
-            push_axiom(AX_CIVIL, term->get_arg(0));
-            break;
-        }
-        case OP_DATE_MONTH: {
-            expr_ref ep(u.mk_epoch(term->get_arg(0)), m);
-            push_axiom(AX_EQ, term, u.mk_month_of_epoch(ep));
-            push_axiom(AX_CIVIL, term->get_arg(0));
-            break;
-        }
+        case OP_DATE_YEAR:
+        case OP_DATE_MONTH:
         case OP_DATE_DAY: {
-            expr_ref ep(u.mk_epoch(term->get_arg(0)), m);
-            push_axiom(AX_EQ, term, u.mk_day_of_epoch(ep));
-            push_axiom(AX_CIVIL, term->get_arg(0));
+            // the selector term itself is the component variable; for
+            // date.mk arguments the constructor axioms already equate
+            // the selectors with the arguments
+            expr* b = term->get_arg(0);
+            rational ry, rmo, rd;
+            if (u.is_numeral_mk(b, ry, rmo, rd)) {
+                // selectors of ground constructors are fixed (invalid
+                // ground constructors force unsat through their own axioms)
+                if (date_util::is_valid_civil(ry, rmo, rd)) {
+                    rational v = term->get_decl_kind() == OP_DATE_YEAR ? ry :
+                                 term->get_decl_kind() == OP_DATE_MONTH ? rmo : rd;
+                    push_axiom(AX_EQ, term, a.mk_int(v));
+                }
+            }
+            else if (!u.is_mk(b))
+                push_axiom(AX_COMPONENTS, b);
             break;
         }
         case OP_DATE_EPOCH:
@@ -414,7 +449,65 @@ namespace smt {
                 ok = false;
             }
         }
-        return ok;
+        if (!ok)
+            return false;
+        return !propagate_components();
+    }
+
+    /**
+       \brief Model-based propagation of the calendar bijection. When the
+       epoch of a date term has an integer value in the current
+       arithmetic assignment but its selector terms do not carry the
+       components of that epoch day, assert the valid lemma
+       epoch(t) = v => component(t) = civil-of-epoch(v). The
+       days-from-civil axioms decide components -> epoch by plain
+       bound propagation; this closes the inverse direction, which
+       otherwise costs the integer solver a case split per date.
+    */
+    bool theory_date::propagate_components() {
+        bool progress = false;
+        m_avalue.init(&ctx);
+        for (unsigned v = 0; v < get_num_vars(); ++v) {
+            expr* t = get_enode(v)->get_expr();
+            if (!u.is_date(t))
+                continue;
+            app_ref ep(u.mk_epoch(t), m);
+            if (!ctx.e_internalized(ep))
+                continue;
+            rational zv;
+            if (!m_avalue.get_value(ep, zv) || !zv.is_int())
+                continue;
+            // one instantiation per (term, epoch value): the axioms are
+            // complete without these lemmas (a final check can only be
+            // accepted when the arithmetic model satisfies the
+            // days-from-civil equations, which forces the components),
+            // so skipping repeats cannot lose answers
+            rational last;
+            if (m_emitted.find(t, last) && last == zv)
+                continue;
+            rational tv[3];
+            date_util::civil_of_epoch(zv, tv[0], tv[1], tv[2]);
+            app_ref sels[3] = { app_ref(u.mk_year(t), m), app_ref(u.mk_month(t), m), app_ref(u.mk_day(t), m) };
+            literal l_ep = null_literal;
+            for (unsigned i = 0; i < 3; ++i) {
+                if (!ctx.e_internalized(sels[i]))
+                    continue;
+                rational cv;
+                if (m_avalue.get_value(sels[i], cv) && cv == tv[i])
+                    continue;
+                if (l_ep == null_literal) {
+                    l_ep = mk_eq(ep, a.mk_int(zv), false);
+                    ctx.mark_as_relevant(l_ep);
+                }
+                literal l_c = mk_eq(sels[i], a.mk_int(tv[i]), false);
+                ctx.mark_as_relevant(l_c);
+                ctx.mk_th_axiom(get_id(), ~l_ep, l_c);
+                progress = true;
+            }
+            if (l_ep != null_literal)
+                m_emitted.insert(t, zv);
+        }
+        return progress;
     }
 
     void theory_date::init_model(model_generator& mg) {

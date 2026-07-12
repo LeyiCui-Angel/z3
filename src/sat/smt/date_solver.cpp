@@ -134,16 +134,16 @@ namespace dates {
             assert_unit_axiom(a.mk_le(a.mk_sub(d, u.mk_days_in_month(y, mo)), a.mk_int(0)));
             expr_ref ep(u.mk_epoch(t), m);
             assert_axiom_eq(ep, u.mk_days_from_civil(y, mo, d));
-            // inverse direction, entailed by the definition and validity:
-            // the components of the epoch are the constructor arguments.
-            // This lets the arithmetic solver recover symbolic arguments
-            // from a known epoch instead of inverting days-from-civil.
-            if (!a.is_numeral(y))
-                assert_axiom_eq(y, u.mk_year_of_epoch(ep));
-            if (!a.is_numeral(mo))
-                assert_axiom_eq(mo, u.mk_month_of_epoch(ep));
-            if (!a.is_numeral(d))
-                assert_axiom_eq(d, u.mk_day_of_epoch(ep));
+            // the components of the constructed date are the constructor
+            // arguments. For ground constructors the definition above is
+            // already a fixed epoch and the selector equalities are folded
+            // by the rewriter wherever selectors occur.
+            rational ry, rmo, rd;
+            if (!u.is_numeral_mk(t, ry, rmo, rd)) {
+                assert_axiom_eq(y, u.mk_year(t));
+                assert_axiom_eq(mo, u.mk_month(t));
+                assert_axiom_eq(d, u.mk_day(t));
+            }
             // constructor-selector roundtrip fast-path
             if (u.is_year(y) && u.is_month(mo) && u.is_day(d)) {
                 expr* x = to_app(y)->get_arg(0);
@@ -152,37 +152,73 @@ namespace dates {
             }
             break;
         }
-        case OP_DATE_ADD: {
-            expr_ref ep(u.mk_epoch(t->get_arg(0)), m);
-            assert_axiom_eq(u.mk_epoch(t),
-                            u.mk_epoch_of_add(ep, t->get_arg(1), t->get_arg(2), t->get_arg(3)));
-            break;
-        }
+        case OP_DATE_ADD:
         case OP_DATE_SUB: {
             // date.sub is date.add with negated offsets
-            expr_ref ep(u.mk_epoch(t->get_arg(0)), m);
-            expr_ref npy(a.mk_uminus(t->get_arg(1)), m);
-            expr_ref npm(a.mk_uminus(t->get_arg(2)), m);
-            expr_ref npd(a.mk_uminus(t->get_arg(3)), m);
-            assert_axiom_eq(u.mk_epoch(t), u.mk_epoch_of_add(ep, npy, npm, npd));
+            bool is_sub = t->get_decl_kind() == OP_DATE_SUB;
+            expr* b = t->get_arg(0);
+            expr_ref py(t->get_arg(1), m), pm(t->get_arg(2), m), pd(t->get_arg(3), m);
+            if (is_sub) {
+                py = u.mk_ineg(py);
+                pm = u.mk_ineg(pm);
+                pd = u.mk_ineg(pd);
+            }
+            if (u.is_zero_month_shift(py, pm)) {
+                // pure day shift: the base date is a valid date, so the
+                // month step and the day clamp are the identity and the
+                // epoch shifts exactly
+                expr_ref rhs(a.mk_add(u.mk_epoch(b), pd), m);
+                assert_axiom_eq(u.mk_epoch(t), rhs);
+            }
+            else if (u.is_zero(pd)) {
+                // pure month shift: the components of the result are
+                // definable without division. On the absolute month
+                // count 12*y + mo the shift is linear, and the bounds
+                // 1 <= month <= 12 from the component axioms make the
+                // year/month decomposition unique; the day is the base
+                // day clamped to the target month length. The epoch
+                // follows from the component axioms of the result
+                // (asserted when the selector terms are internalized).
+                assert_component_axioms(t);
+                expr_ref yb(u.mk_year(b), m), mb(u.mk_month(b), m), db(u.mk_day(b), m);
+                expr_ref yt(u.mk_year(t), m), mt(u.mk_month(t), m);
+                expr_ref shift(a.mk_add(a.mk_mul(a.mk_int(12), py), pm), m);
+                expr_ref rhs(a.mk_add(u.mk_month_total(yb, mb), shift), m);
+                assert_axiom_eq(u.mk_month_total(yt, mt), rhs);
+                expr_ref clamped = u.mk_clamped_day(db, yt, mt);
+                assert_axiom_eq(u.mk_day(t), clamped);
+            }
+            else {
+                // general shift: factor through the pure month shift,
+                // then shift days exactly on epochs
+                expr_ref zero(a.mk_int(0), m);
+                expr* args[4] = { b, py, pm, zero };
+                app_ref mid(m.mk_app(u.get_family_id(), OP_DATE_ADD, 4, args), m);
+                expr_ref rhs(a.mk_add(u.mk_epoch(mid), pd), m);
+                assert_axiom_eq(u.mk_epoch(t), rhs);
+            }
             break;
         }
-        case OP_DATE_YEAR: {
-            expr_ref ep(u.mk_epoch(t->get_arg(0)), m);
-            assert_axiom_eq(t, u.mk_year_of_epoch(ep));
-            assert_civil_identity(t->get_arg(0));
-            break;
-        }
-        case OP_DATE_MONTH: {
-            expr_ref ep(u.mk_epoch(t->get_arg(0)), m);
-            assert_axiom_eq(t, u.mk_month_of_epoch(ep));
-            assert_civil_identity(t->get_arg(0));
-            break;
-        }
+        case OP_DATE_YEAR:
+        case OP_DATE_MONTH:
         case OP_DATE_DAY: {
-            expr_ref ep(u.mk_epoch(t->get_arg(0)), m);
-            assert_axiom_eq(t, u.mk_day_of_epoch(ep));
-            assert_civil_identity(t->get_arg(0));
+            // the selector term itself is the component variable; for
+            // date.mk arguments the constructor axioms already equate
+            // the selectors with the arguments
+            expr* b = t->get_arg(0);
+            rational ry, rmo, rd;
+            if (u.is_numeral_mk(b, ry, rmo, rd)) {
+                // selectors of ground constructors are fixed (invalid
+                // ground constructors force unsat through their own axioms)
+                if (date_util::is_valid_civil(ry, rmo, rd)) {
+                    rational v = t->get_decl_kind() == OP_DATE_YEAR ? ry :
+                                 t->get_decl_kind() == OP_DATE_MONTH ? rmo : rd;
+                    expr_ref val(a.mk_int(v), m);
+                    assert_axiom_eq(t, val);
+                }
+            }
+            else if (!u.is_mk(b))
+                assert_component_axioms(b);
             break;
         }
         case OP_DATE_LT:
@@ -220,27 +256,23 @@ namespace dates {
     }
 
     /**
-       \brief Assert epoch(d) = days-from-civil(year, month, day of epoch(d))
-       together with range bounds on the components. These are valid facts
-       of the calendar bijection; providing them as axioms lets equalities
-       between components propagate to equalities between epochs by
-       congruence, instead of requiring the arithmetic solver to re-derive
-       injectivity of the calendar map.
+       \brief Component axioms for a Date term: its selector terms form a
+       valid civil triple whose days-from-civil image is its epoch. The
+       selectors act as the component variables of the relational
+       encoding; the inverse civil-of-epoch direction is never encoded,
+       the integer solver searches over the bounded components instead.
     */
-    void solver::assert_civil_identity(expr* d) {
+    void solver::assert_component_axioms(expr* d) {
+        expr_ref y(u.mk_year(d), m);
+        expr_ref mo(u.mk_month(d), m);
+        expr_ref dd(u.mk_day(d), m);
+        assert_unit_axiom(a.mk_ge(mo, a.mk_int(1)));
+        assert_unit_axiom(a.mk_le(mo, a.mk_int(12)));
+        assert_unit_axiom(a.mk_ge(dd, a.mk_int(1)));
+        // bound form (term <= numeral): days-in-month is an ite term
+        assert_unit_axiom(a.mk_le(a.mk_sub(dd, u.mk_days_in_month(y, mo)), a.mk_int(0)));
         expr_ref ep(u.mk_epoch(d), m);
-        assert_axiom_eq(ep, u.mk_civil_roundtrip(ep));
-        expr_ref mo = u.mk_month_of_epoch(ep);
-        expr_ref dd = u.mk_day_of_epoch(ep);
-        expr_ref one(a.mk_int(1), m);
-        expr_ref mo_ge(a.mk_ge(mo, one), m);
-        expr_ref mo_le(a.mk_le(mo, a.mk_int(12)), m);
-        expr_ref dd_ge(a.mk_ge(dd, one), m);
-        expr_ref dd_le(a.mk_le(dd, a.mk_int(31)), m);
-        add_unit(mk_literal(mo_ge));
-        add_unit(mk_literal(mo_le));
-        add_unit(mk_literal(dd_ge));
-        add_unit(mk_literal(dd_le));
+        assert_axiom_eq(ep, u.mk_days_from_civil(y, mo, dd));
     }
 
     /**
