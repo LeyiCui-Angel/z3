@@ -127,6 +127,9 @@ class date_util {
     // day-of-year offset of the first day of month mo (Hinnant's
     // (153*mp+2)/5 table folded into an ite table over mo in [1,12])
     expr_ref mk_month_offset(expr* mo);
+    // 0/1 indicator of mo <= 2, the only ite feeding the shifted year
+    // and month offset of days-from-civil
+    expr_ref mk_jan_feb_flag(expr* mo);
 
 public:
     date_util(ast_manager& m):
@@ -223,6 +226,17 @@ public:
     expr_ref mk_month_total(expr* y, expr* mo);
     // dd clamped to the length of month mo of year y (end-of-month rule)
     expr_ref mk_clamped_day(expr* dd, expr* y, expr* mo);
+    // tautological bound cuts over the ite terms of the civil encoding
+    // of (y, mo): 0 <= jan-feb-flag <= 1 and 28 <= days-in-month <= 31.
+    // Redundant for the Boolean search, but an ite variable has no LP
+    // row until its condition is decided; without the cuts the epoch of
+    // a date is completely decoupled from its components in the LP
+    // relaxation and the integer solver's model search is blind.
+    void mk_civil_cuts(expr* y, expr* mo, expr_ref_vector& cuts);
+    // lo/hi bounds (in days) on epoch(date.add b py pm 0) - epoch(b)
+    // for a month shift of s = 12*py + pm months, end-of-month clamp
+    // included. Valid for every valid base date and every integer s.
+    static void month_span_bounds(rational const& s, rational& lo, rational& hi);
     // true if py and pm are numerals denoting a zero month shift, so
     // date.add reduces to a pure day shift on epochs
     bool is_zero_month_shift(expr* py, expr* pm) const;

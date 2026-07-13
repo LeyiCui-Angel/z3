@@ -69,6 +69,7 @@ namespace smt {
     class theory_date : public theory {
         enum axiom_kind {
             AX_EQ,          // e1 = e2 (definitional axiom)
+            AX_UNIT,        // e1 is a Bool constraint asserted as a unit axiom
             AX_CMP,         // e1 is a comparison atom to axiomatize
             AX_EPOCH_BOUND, // e1 is a Date term whose epoch is registered with arith
             AX_INJ,         // e1, e2 are Date terms: epoch(e1) = epoch(e2) => e1 = e2
@@ -90,10 +91,41 @@ namespace smt {
         expr_ref_vector     m_e1s, m_e2s;
         unsigned            m_qhead { 0 };
 
-        // last epoch value for which component lemmas were emitted, per
-        // date term; a heuristic damper for propagate_components (not
-        // backtracked, safe because the lemmas are redundant)
-        obj_map<expr, rational> m_emitted;
+        // month-window starts (resp. hint values) already emitted, per
+        // date term; dampers for propagate_windows (not backtracked,
+        // safe because the lemmas are valid and redundant)
+        obj_map<expr, vector<rational>> m_emitted;
+        obj_map<expr, vector<rational>> m_chain_emitted;
+        obj_map<expr, vector<rational>> m_hint_emitted;
+        // rounds a constant-shift term has been inexact with nothing new
+        // to emit; at a threshold the term is escalated to the eager tier
+        obj_map<expr, unsigned> m_stuck;
+        // cumulative count of chain-window lemmas emitted per term (the
+        // march detector: a healthy repair uses a handful of windows)
+        obj_map<expr, unsigned> m_clears;
+        // date terms whose selectors occur in the input formula (as
+        // opposed to selector terms created by this solver's own lemmas)
+        obj_hashtable<expr>     m_sel_terms;
+        // epoch model values seen at the previous propagate_windows call;
+        // lemmas are only emitted when the snapshot is unchanged, i.e.
+        // when the arithmetic assignment has settled -- values read while
+        // the integer search is still moving are garbage and chasing
+        // them pollutes the emission history
+        obj_map<expr, rational> m_last_vals;
+        // extreme epoch positions observed per inexact chain term (the
+        // march detector's drift range)
+        obj_map<expr, rational> m_pos_lo;
+        obj_map<expr, rational> m_pos_hi;
+        obj_hashtable<expr>     m_escalated;
+        // last successful placement (kept across final checks so the
+        // suggested configuration is stable; not backtracked)
+        obj_map<expr, rational> m_place;
+        bool                    m_place_valid { false };
+
+        // comparison atoms and date disequalities seen so far, for the
+        // placement search (trail-backtracked alongside the axiom queue)
+        expr_ref_vector m_cmp_atoms;
+        expr_ref_vector m_dq1s, m_dq2s;
 
         void push_axiom(axiom_kind k, expr* e1, expr* e2 = nullptr);
         bool flush_axioms();
@@ -104,12 +136,17 @@ namespace smt {
         void assert_injectivity(expr* d1, expr* d2);
         void assert_component_axioms(expr* d);
         void assert_mk_axioms(app* mk);
+        void push_shift_axioms(app* term, expr* b, expr* py, expr* pm);
+        void escalate_shift(expr* t);
         void assert_mk_injectivity(expr* e);
 
         void ensure_var(enode* n);
         bool epoch_value(enode* n, rational& val);
         bool final_check();
-        bool propagate_components();
+        bool implied_epoch(expr* t, obj_map<expr, rational>& memo, rational& z);
+        bool propagate_windows();
+        bool chain_eval(expr* t, obj_map<expr, rational> const& base, rational& z);
+        bool find_placement(obj_map<expr, rational>& base);
 
     public:
         theory_date(context& ctx);

@@ -14,6 +14,8 @@ Author:
     Z3 date theory extension 2026-07-05
 
 --*/
+#include <algorithm>
+#include <climits>
 #include "ast/date_decl_plugin.h"
 #include "ast/ast_pp.h"
 
@@ -307,14 +309,29 @@ expr_ref date_util::mk_imod(expr* x, int c) {
     return expr_ref(m_arith.mk_mod(x, m_arith.mk_int(c)), m);
 }
 
+expr_ref date_util::mk_jan_feb_flag(expr* mo) {
+    // 0/1 indicator of mo <= 2. The ite is confined to this tiny term so
+    // that the shifted year and the month offset stay *linear* in mo and
+    // the flag: with the cut 0 <= flag <= 1 asserted, the LP relaxation
+    // keeps epoch and components coupled before the condition is decided,
+    // where an ite over the full subterm leaves them disconnected.
+    arith_util& a = m_arith;
+    return expr_ref(m.mk_ite(a.mk_le(mo, mk_num(2)), mk_num(1), mk_num(0)), m);
+}
+
 expr_ref date_util::mk_month_offset(expr* mo) {
     // day-of-year of the first day of month mo relative to March 1:
-    // Hinnant's (153*mp + 2)/5 with mp = (mo + 9) mod 12. The div form
-    // is kept (rather than a 12-way ite table) because its LP relaxation
-    // is tight: moff ~ 30.6*mp pins the month during model search, where
-    // an ite table costs blind Boolean case splits.
+    // Hinnant's (153*mp + 2)/5 with mp = (mo + 9) mod 12, written
+    // linearly as mp = mo - 3 + 12*flag. The div form is kept (rather
+    // than a 12-way ite table) because its LP relaxation is tight:
+    // moff ~ 30.6*mp pins the month during model search, where an ite
+    // table costs blind Boolean case splits.
     arith_util& a = m_arith;
-    expr_ref mp(a.mk_add(mo, m.mk_ite(a.mk_le(mo, mk_num(2)), mk_num(9), mk_num(-3))), m);
+    expr_ref b2 = mk_jan_feb_flag(mo);
+    expr_ref m3 = mk_num(-3);
+    expr_ref b12(a.mk_mul(mk_num(12), b2), m);
+    expr* mp_args[3] = { mo, m3, b12 };
+    expr_ref mp(a.mk_add(3, mp_args), m);
     return mk_idiv(a.mk_add(a.mk_mul(mk_num(153), mp), mk_num(2)), 5);
 }
 
@@ -325,7 +342,8 @@ expr_ref date_util::mk_days_from_civil(expr* y, expr* mo, expr* d) {
     // yoe = yp - 400*era collapses to 365*yp + yp/4 - yp/100 + yp/400
     // (the divisions are Euclidean = floor, the divisors are positive).
     // Only three div terms remain, all over the same shifted year.
-    expr_ref yp(m.mk_ite(a.mk_le(mo, mk_num(2)), a.mk_sub(y, mk_num(1)), y), m);
+    expr_ref b2 = mk_jan_feb_flag(mo);
+    expr_ref yp(a.mk_sub(y, b2), m);
     expr_ref y365(a.mk_mul(mk_num(365), yp), m);
     expr_ref d4 = mk_idiv(yp, 4);
     expr_ref nd100(a.mk_mul(mk_num(-1), mk_idiv(yp, 100)), m);
@@ -345,6 +363,58 @@ expr_ref date_util::mk_days_in_month(expr* y, expr* mo) {
                                  m.mk_eq(mo, mk_num(9)), m.mk_eq(mo, mk_num(11))), m);
     return expr_ref(m.mk_ite(m.mk_eq(mo, mk_num(2)), feb,
                              m.mk_ite(short_month, mk_num(30), mk_num(31))), m);
+}
+
+void date_util::mk_civil_cuts(expr* y, expr* mo, expr_ref_vector& cuts) {
+    arith_util& a = m_arith;
+    // tautological bounds over the ite terms of the civil encoding.
+    // Each ite variable has no LP row until its condition is assigned;
+    // these cuts keep the relaxation bounded from the start.
+    expr_ref b2 = mk_jan_feb_flag(mo);
+    cuts.push_back(a.mk_ge(b2, mk_num(0)));
+    cuts.push_back(a.mk_le(b2, mk_num(1)));
+    expr_ref dim = mk_days_in_month(y, mo);
+    cuts.push_back(a.mk_ge(dim, mk_num(28)));
+    cuts.push_back(a.mk_le(dim, mk_num(31)));
+}
+
+void date_util::month_span_bounds(rational const& s, rational& lo, rational& hi) {
+    static const int min_len[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    rational const r12(12);
+    rational abs_s = abs(s);
+    rational q = div(abs_s, r12);
+    unsigned r = (abs_s - r12 * q).get_unsigned(); // 0 <= r < 12
+    int minr = 0, maxr = 0;
+    if (r > 0) {
+        minr = INT_MAX;
+        maxr = INT_MIN;
+        for (unsigned st = 0; st < 12; ++st) {
+            int mn = 0, mx = 0;
+            for (unsigned i = 0; i < r; ++i) {
+                unsigned mi = (st + i) % 12;
+                mn += min_len[mi];
+                mx += min_len[mi] + (mi == 1 ? 1 : 0); // Feb may have 29 days
+            }
+            minr = std::min(minr, mn);
+            maxr = std::max(maxr, mx);
+        }
+    }
+    // the months between the base and the shifted first-of-month form
+    // |s| consecutive months: any block of 12 consecutive months spans
+    // 365 or 366 days (it contains exactly one February), the remaining
+    // r months span between the shortest and the longest r-month window.
+    // The end-of-month clamp lowers the day of the result by at most 3
+    // (day <= 31, month length >= 28), in both shift directions.
+    rational sum_lo = rational(365) * q + rational(minr);
+    rational sum_hi = rational(366) * q + rational(maxr);
+    if (s.is_neg()) {
+        lo = -sum_hi - rational(3);
+        hi = -sum_lo;
+    }
+    else {
+        lo = sum_lo - rational(3);
+        hi = sum_hi;
+    }
 }
 
 bool date_util::is_zero_month_shift(expr* py, expr* pm) const {
