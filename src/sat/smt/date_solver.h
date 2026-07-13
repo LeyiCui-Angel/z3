@@ -62,6 +62,25 @@ namespace dates {
         expr_ref_vector     m_e1s, m_e2s;
         unsigned            m_qhead = 0;
 
+        // comparison atoms and date disequalities seen so far, for the
+        // exactness gate (trail-backtracked alongside the axiom queue)
+        expr_ref_vector m_cmp_atoms;
+        expr_ref_vector m_dq1s, m_dq2s;
+
+        // final-check machinery for constant add/sub chains (see
+        // smt/theory_date.cpp for the design notes): emission histories,
+        // stability snapshot, march detector and escalation state.
+        // None of these are backtracked; the lemmas they gate are valid.
+        obj_map<expr, vector<rational>> m_emitted;
+        obj_map<expr, vector<rational>> m_chain_emitted;
+        obj_map<expr, vector<rational>> m_cover_emitted;
+        obj_map<expr, unsigned>         m_stuck;
+        obj_hashtable<expr>             m_escalated;
+        obj_hashtable<expr>             m_sel_terms;
+        obj_map<expr, rational>         m_last_vals;
+        obj_map<expr, rational>         m_pos_lo;
+        obj_map<expr, rational>         m_pos_hi;
+
         euf::theory_var mk_var(euf::enode* n) override;
         void track_date(euf::enode* n);
         void push_axiom(axiom_kind k, expr* e1, expr* e2 = nullptr);
@@ -73,6 +92,10 @@ namespace dates {
         void assert_mk_injectivity(euf::enode* n);
         void assert_component_axioms(expr* d);
         void assert_mk_axioms(app* mk);
+        void push_shift_axioms(app* term, expr* b, expr* py, expr* pm);
+        void escalate_shift(expr* t);
+        bool implied_epoch(expr* t, obj_map<expr, rational>& memo, rational& z);
+        bool propagate_windows();
         void internalize_date_op(app* term);
         bool epoch_value(euf::enode* n, rational& val);
 
@@ -101,7 +124,7 @@ namespace dates {
         bool use_diseqs() const override { return true; }
         void new_diseq_eh(euf::th_eq const& eq) override;
         void add_value(euf::enode* n, model& mdl, expr_ref_vector& values) override;
-        bool add_dep(euf::enode* n, top_sort<euf::enode>& dep) override { dep.insert(n, nullptr); return true; }
+        bool add_dep(euf::enode* n, top_sort<euf::enode>& dep) override;
     };
 
 }

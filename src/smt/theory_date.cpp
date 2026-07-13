@@ -190,8 +190,6 @@ namespace smt {
         ctx.mark_as_relevant(ge);
         ctx.mk_th_axiom(get_id(), le, ge);
         rational B(4000000);
-        if (char const* bs = getenv("DATE_BOX"))
-            B = rational(atoi(bs));
         expr_ref lo(a.mk_ge(ep, a.mk_int(-B)), m);
         expr_ref hi(a.mk_le(ep, a.mk_int(B)), m);
         m_rw(lo);
@@ -672,192 +670,6 @@ namespace smt {
        can be damped or capped without affecting soundness; when it
        emits nothing, the eager axioms alone decide the final check.
     */
-    /**
-       \brief Evaluate the epoch of an add/sub chain exactly, given
-       candidate epochs for the base dates. Fails on chains with
-       non-numeral offsets.
-    */
-    bool theory_date::chain_eval(expr* t, obj_map<expr, rational> const& base, rational& z) {
-        if (base.find(t, z))
-            return true;
-        rational vy, vm, vd;
-        if (u.is_numeral_mk(t, vy, vm, vd)) {
-            if (!date_util::is_valid_civil(vy, vm, vd))
-                return false;
-            z = date_util::days_from_civil(vy, vm, vd);
-            return true;
-        }
-        if (u.is_add(t) || u.is_sub(t)) {
-            app* ap = to_app(t);
-            rational py, pm, pd, zb;
-            if (!a.is_extended_numeral(ap->get_arg(1), py) ||
-                !a.is_extended_numeral(ap->get_arg(2), pm) ||
-                !a.is_extended_numeral(ap->get_arg(3), pd))
-                return false;
-            if (!chain_eval(ap->get_arg(0), base, zb))
-                return false;
-            if (u.is_sub(t)) {
-                py.neg(); pm.neg(); pd.neg();
-            }
-            z = date_util::add_to_epoch(zb, py, pm, pd);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-       \brief Search for a placement of the base dates that satisfies
-       every currently assigned date atom (comparisons, equalities and
-       disequalities between date terms), by iterative repair over exact
-       C++ evaluation of the add/sub chains. The eager axioms decide the
-       theory without this; a successful placement is used purely to
-       coordinate the decision hints and window lemmas, replacing the
-       integer solver's branch-and-bound drift with one consistent
-       candidate that the SAT engine can adopt by propagation.
-    */
-    bool theory_date::find_placement(obj_map<expr, rational>& base) {
-        // base dates: free constants and constructors with symbolic
-        // arguments. Initialized from the last successful placement so
-        // the suggested configuration stays stable across final checks;
-        // new bases start from the current arithmetic model.
-        ptr_vector<expr> bases;
-        for (unsigned v = 0; v < get_num_vars(); ++v) {
-            expr* t = get_enode(v)->get_expr();
-            if (!u.is_date(t))
-                continue;
-            bool is_op = is_app(t) && to_app(t)->get_family_id() == get_family_id();
-            rational vy, vm, vd;
-            if (is_op && !(u.is_mk(t) && !u.is_numeral_mk(t, vy, vm, vd)))
-                continue;
-            if (base.contains(t))
-                continue;
-            rational z(0), vv;
-            if (!(m_place_valid && m_place.find(t, z))) {
-                app_ref ep(u.mk_epoch(t), m);
-                if (ctx.e_internalized(ep) && m_avalue.get_value(ep, vv))
-                    z = floor(vv);
-            }
-            base.insert(t, z);
-            bases.push_back(t);
-        }
-        // constraints: (kind, lhs, rhs) with kind from the comparison
-        // operators, plus equalities (E) and disequalities (D)
-        struct cnstr { char k; expr* l; expr* r; };
-        svector<cnstr> cs;
-        for (expr* e : m_cmp_atoms) {
-            app* atom = to_app(e);
-            if (!ctx.b_internalized(atom) || !ctx.is_relevant(atom))
-                continue;
-            lbool tv = ctx.get_assignment(ctx.get_bool_var(atom));
-            if (tv == l_undef)
-                continue;
-            char k;
-            switch (atom->get_decl_kind()) {
-            case OP_DATE_LT: k = tv == l_true ? '<' : 'g'; break; // g: >=
-            case OP_DATE_LE: k = tv == l_true ? 'l' : '>'; break; // l: <=
-            case OP_DATE_GT: k = tv == l_true ? '>' : 'l'; break;
-            case OP_DATE_GE: k = tv == l_true ? 'g' : '<'; break;
-            default: continue;
-            }
-            cs.push_back({ k, atom->get_arg(0), atom->get_arg(1) });
-        }
-        // equalities: all date terms merged into one class must coincide
-        obj_map<enode, expr*> reps;
-        for (unsigned v = 0; v < get_num_vars(); ++v) {
-            expr* t = get_enode(v)->get_expr();
-            if (!u.is_date(t))
-                continue;
-            enode* r = get_enode(v)->get_root();
-            expr* rep = nullptr;
-            if (reps.find(r, rep))
-                cs.push_back({ 'E', rep, t });
-            else
-                reps.insert(r, t);
-        }
-        for (unsigned i = 0; i < m_dq1s.size(); ++i)
-            cs.push_back({ 'D', m_dq1s.get(i), m_dq2s.get(i) });
-
-        auto holds = [&](cnstr const& c, rational const& l, rational const& r) {
-            switch (c.k) {
-            case '<': return l < r;
-            case 'l': return l <= r;
-            case '>': return l > r;
-            case 'g': return l >= r;
-            case 'E': return l == r;
-            case 'D': return l != r;
-            default: return true;
-            }
-        };
-        // the base date a chain's value follows
-        auto root_base = [&](expr* t) -> expr* {
-            while (is_app(t) && (u.is_add(t) || u.is_sub(t)))
-                t = to_app(t)->get_arg(0);
-            return base.contains(t) ? t : nullptr;
-        };
-        rational const big(100000000);
-        unsigned n_violated = 0;
-        for (unsigned iter = 0; iter < 400; ++iter) {
-            unsigned first_violated = UINT_MAX;
-            rational lv, rv;
-            for (unsigned i = 0; i < cs.size(); ++i) {
-                unsigned j = (i + iter) % cs.size();
-                rational l, r;
-                if (!chain_eval(cs[j].l, base, l) || !chain_eval(cs[j].r, base, r))
-                    return false;
-                if (!holds(cs[j], l, r)) {
-                    first_violated = j;
-                    lv = l;
-                    rv = r;
-                    break;
-                }
-            }
-            if (first_violated == UINT_MAX) {
-                m_place.reset();
-                for (auto const& kv : base)
-                    m_place.insert(kv.m_key, kv.m_value);
-                m_place_valid = true;
-                return true;
-            }
-            ++n_violated;
-            cnstr const& c = cs[first_violated];
-            // move one side's base towards satisfaction; alternate sides
-            bool move_left = (n_violated % 2) == 0;
-            expr* mb = move_left ? root_base(c.l) : root_base(c.r);
-            if (!mb)
-                mb = move_left ? root_base(c.r) : root_base(c.l);
-            if (!mb)
-                return false;
-            rational target_delta;
-            switch (c.k) {
-            case '<': case 'l': target_delta = rv - lv - (c.k == '<' ? 1 : 0); break;
-            case '>': case 'g': target_delta = rv - lv + (c.k == '>' ? 1 : 0); break;
-            case 'E': target_delta = rv - lv; break;
-            case 'D': target_delta = rational(1); break;
-            default: target_delta = rational(0); break;
-            }
-            // first-order: chain values move about as fast as their base
-            rational bump = (root_base(c.l) == mb) ? target_delta : -target_delta;
-            if (bump.is_zero())
-                bump = rational(1);
-            rational nv = base[mb] + bump;
-            if (nv > big) nv = big;
-            if (nv < -big) nv = -big;
-            base[mb] = nv;
-            // refine: clamping plateaus make chains locally constant
-            for (unsigned r2 = 0; r2 < 8; ++r2) {
-                rational l, r;
-                if (!chain_eval(c.l, base, l) || !chain_eval(c.r, base, r))
-                    return false;
-                if (holds(c, l, r))
-                    break;
-                rational d = (root_base(c.l) == mb) ? (r - l) : (l - r);
-                if (d.is_zero())
-                    d = rational(1);
-                base[mb] = base[mb] + d;
-            }
-        }
-        return false;
-    }
 
     bool theory_date::propagate_windows() {
         m_avalue.init(&ctx);
@@ -1002,7 +814,50 @@ namespace smt {
                 (ctx.e_internalized(ds) && m_avalue.get_value(ds, cv) && cv != D))
                 sel_mismatch = true;
         }
+        // coverage: exactness of the current assignment is not enough.
+        // The arithmetic solver may still patch values when it builds
+        // the final model, which silently breaks the calendar relations
+        // between the produced date values. Accept only when every
+        // in-use epoch is pinned at its accepted value by assigned point
+        // bounds (a tautology pair whose disjuncts are preferred true);
+        // emit the missing pins otherwise.
+        bool cover_missing = false;
+        // pins only harden a state that would otherwise be accepted;
+        // emitting them while the search is still repairing just adds
+        // sticky preferences at positions that are about to move
         if (inexact.empty() && !sel_mismatch)
+        for (expr* t : terms) {
+            rational zt;
+            if (m_escalated.contains(t) || !exact.find(t, zt))
+                continue;
+            app_ref ept(u.mk_epoch(t), m);
+            if (!ctx.e_internalized(ept))
+                continue;
+            expr_ref pge(a.mk_ge(ept, a.mk_int(zt)), m);
+            expr_ref ple(a.mk_le(ept, a.mk_int(zt)), m);
+            m_rw(pge);
+            m_rw(ple);
+            literal p1 = mk_literal(pge);
+            literal p2 = mk_literal(ple);
+            if (ctx.get_assignment(p1) == l_true && ctx.get_assignment(p2) == l_true)
+                continue;
+            auto& vs = m_cover_emitted.insert_if_not_there(t, vector<rational>());
+            if (vs.contains(zt)) {
+                // pin proposed before and not adopted; accept as is
+                // rather than looping
+                continue;
+            }
+            if (vs.size() >= 128)
+                vs.reset();
+            vs.push_back(zt);
+            ctx.mark_as_relevant(p1);
+            ctx.mark_as_relevant(p2);
+            ctx.set_true_first_flag(p1.var());
+            ctx.set_true_first_flag(p2.var());
+            ctx.mk_th_lemma(get_id(), p1, p2);
+            cover_missing = true;
+        }
+        if (inexact.empty() && !sel_mismatch && !cover_missing)
             return false;
         // while the arithmetic assignment is still moving, just signal
         // that the final check cannot be accepted yet; acting on the
@@ -1044,14 +899,6 @@ namespace smt {
             if (!ctx.e_internalized(ep))
                 continue;
 
-        if (inexact.empty() && !sel_mismatch)
-            return false;
-        // while the arithmetic assignment is still moving, just signal
-        // that the final check cannot be accepted yet; acting on the
-        // moving values would emit windows at meaningless positions
-        if (!stable)
-            return true;
-        obj_map<expr, rational>& implied = exact;
             // 2. component window lemmas for terms whose selectors
             // exist: for the suggested placement AND for the term's
             // current model position. The placement windows attract the
@@ -1163,7 +1010,7 @@ namespace smt {
                 progress = true;
             }
         }
-        if (progress)
+        if (progress || cover_missing)
             return true;
         if (inexact.empty())
             return false;

@@ -632,11 +632,24 @@ namespace arith {
                 value = a.mk_numeral(m_nla->am(), nl_value(v, m_nla->tmp1()), a.is_int(o));
         }
         else if (v != euf::null_theory_var) {
+            // the tableau cannot answer value queries while bound updates
+            // are pending or the last solve did not reach feasibility
+            // (e.g. when another theory queries values during final check
+            // before this solver has re-solved); report that no value is
+            // available instead of tripping the solver
+            if (!lp().columns_with_changed_bounds().empty())
+                return false;
+            auto st = lp().get_status();
+            if (st != lp::lp_status::OPTIMAL && st != lp::lp_status::FEASIBLE)
+                return false;
             rational r = get_value(v);
             TRACE(arith, tout << mk_pp(o, m) << " v" << v << " := " << r << "\n";);
-            SASSERT("integer variables should have integer values: " && (ctx.get_config().m_arith_ignore_int || !a.is_int(o) || r.is_int() || m_not_handled != nullptr || m.limit().is_canceled()));
-            if (a.is_int(o) && !r.is_int())
+            if (a.is_int(o) && !r.is_int()) {
+                // mid-search queries can observe non-integral assignments
+                if (!ctx.get_config().m_arith_ignore_int && m_not_handled == nullptr && !m.limit().is_canceled())
+                    return false;
                 r = floor(r);
+            }
             value = a.mk_numeral(r, o->get_sort());
         }
         else

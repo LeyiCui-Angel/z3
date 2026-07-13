@@ -96,7 +96,7 @@ namespace smt {
         // safe because the lemmas are valid and redundant)
         obj_map<expr, vector<rational>> m_emitted;
         obj_map<expr, vector<rational>> m_chain_emitted;
-        obj_map<expr, vector<rational>> m_hint_emitted;
+        obj_map<expr, vector<rational>> m_cover_emitted;
         // rounds a constant-shift term has been inexact with nothing new
         // to emit; at a threshold the term is escalated to the eager tier
         obj_map<expr, unsigned> m_stuck;
@@ -117,10 +117,6 @@ namespace smt {
         obj_map<expr, rational> m_pos_lo;
         obj_map<expr, rational> m_pos_hi;
         obj_hashtable<expr>     m_escalated;
-        // last successful placement (kept across final checks so the
-        // suggested configuration is stable; not backtracked)
-        obj_map<expr, rational> m_place;
-        bool                    m_place_valid { false };
 
         // comparison atoms and date disequalities seen so far, for the
         // placement search (trail-backtracked alongside the axiom queue)
@@ -145,8 +141,6 @@ namespace smt {
         bool final_check();
         bool implied_epoch(expr* t, obj_map<expr, rational>& memo, rational& z);
         bool propagate_windows();
-        bool chain_eval(expr* t, obj_map<expr, rational> const& base, rational& z);
-        bool find_placement(obj_map<expr, rational>& base);
 
     public:
         theory_date(context& ctx);
